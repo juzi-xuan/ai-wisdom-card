@@ -25,6 +25,8 @@
 import sys  # 👉 sys 是"系统管家"：和 Python 解释器打交道，这里用来修改模块搜索路径
 import json  # 👉 json 是"翻译官"：能把字符串变成字典、把字典变成字符串
 import os  # 👉 os 是"操作系统小助手"：读取系统环境变量
+import re  # 👉 re 是"文字侦探"：用正则表达式在文本中查找匹配的内容
+import io  # 👉 io 是"内存读写器"：把图片临时存在内存里，方便下载
 from pathlib import Path  # 👉 Path 是"地图导航"：处理文件和文件夹路径
 
 import streamlit as st  # 👉 streamlit 是"网页生成器"：把 Python 代码变成网页，简称 st
@@ -44,9 +46,10 @@ from dotenv import load_dotenv  # 👉 "密码读取器"：从 .env 文件里读
 env_path = Path(__file__).parent.parent / ".env"  # 👆 找到项目根目录下的 .env 文件
 load_dotenv(dotenv_path=env_path)  # 👆 把 .env 里的配置读到环境变量里
 
-# ---------- 导入我们自己写的 Dify 客户端 ----------
+# ---------- 导入我们自己写的 Dify 客户端和图片生成器 ----------
 # 现在 Python 已经知道去 backend/ 找了（前面加了 sys.path）
 from dify_api import DifyClient  # 👆 我们自己写的"AI 对话客户端"
+from image_generator import generate_card_image  # 👆 "卡片印刷机"：把 JSON 变成图片
 
 
 # ========================== 第二段：辅助工具函数 ==========================
@@ -76,6 +79,118 @@ def _get_config(key: str, default: str = "") -> str:
         return st.secrets.get(key, default)  # 👆 先尝试从 Streamlit secrets 读
     except Exception:
         return os.getenv(key, default)  # 👆 读不到就从环境变量（.env）里读
+
+
+def _parse_card_json(raw_text: str) -> dict:
+    """
+    解析 Dify 工作流返回的卡片设计 JSON
+
+    Dify 工作流输出的 LLM 文本可能包含以下格式之一：
+    1. 纯 JSON：{"title": "...", "quote": "..."}
+    2. Markdown 代码块包裹的 JSON：```json\n{...}\n```
+    3. 文本中嵌入 JSON（LLM 在 JSON 前后加了解释性文字）
+
+    这个函数用"层层剥洋葱"的策略，尝试提取出有效的 JSON。
+
+    参数：
+        raw_text: Dify 工作流返回的原始文本
+
+    返回：
+        解析成功的字典；如果完全无法解析，返回空字典 {}
+    """
+    if not raw_text:
+        return {}
+
+    text = raw_text.strip()
+
+    # ===== 策略 1：尝试直接解析（最常见的情况） =====
+    try:
+        data = json.loads(text)
+        return data
+    except json.JSONDecodeError:
+        pass  # 👆 解析失败继续尝试其他策略
+
+    # ===== 策略 2：去掉 ```json ... ``` 包裹 =====
+    # 匹配被 Markdown 代码块包裹的 JSON
+    json_block_pattern = r'```(?:json)?\s*\n?(.*?)\n?```'
+    match = re.search(json_block_pattern, text, re.DOTALL)
+    # 👆 re.DOTALL 让 . 也能匹配换行符，因为 JSON 通常跨多行
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return data
+        except json.JSONDecodeError:
+            pass
+
+    # ===== 策略 3：查找第一个 { 到最后一个 } 之间的内容 =====
+    # 适用于 LLM 在 JSON 前后写了废话的情况
+    # 比如："好的，以下是卡片设计：\n{...}\n希望对你有帮助"
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        json_candidate = text[first_brace:last_brace + 1]
+        try:
+            data = json.loads(json_candidate)
+            return data
+        except json.JSONDecodeError:
+            pass
+
+    # ===== 全部失败：返回空字典 =====
+    return {}
+
+
+def _extract_card_data_from_outputs(outputs: dict) -> dict:
+    """
+    从 Dify 工作流的 outputs 中提取卡片数据（支持两种模式）
+
+    模式 1：单 JSON 模式
+        Dify 输出只有一个变量，值是完整的卡片 JSON 字符串
+        例：{"text": '{"title":"...","quote":"...","book":"..."}'}
+
+    模式 2：多字段模式
+        Dify 输出有多个变量，每个变量对应卡片的一个字段
+        例：{"title":"...","quote":"...","summary":"...","book":"...","movie":"..."}
+
+    参数：
+        outputs: Dify workflow_finished 事件中的 outputs 字典
+
+    返回：
+        (card_data: dict, extraction_mode: str) 元组
+        card_data: 卡片数据字典
+        extraction_mode: "single_json" | "multi_field" | "empty"
+    """
+    if not outputs:
+        return {}, "empty"
+
+    # ===== 策略 A：多字段模式检测 =====
+    # 如果 outputs 里有 card_data 需要的字段（title, quote 等），说明是多字段模式
+    card_field_names = {"title", "quote", "summary", "keywords", "style", "book", "movie"}
+    output_keys = set(outputs.keys())
+    matching_fields = output_keys & card_field_names
+    # 👆 取交集：看看 outputs 的 key 中有多少个是卡片字段名
+
+    if len(matching_fields) >= 2:
+        # 至少匹配 2 个字段 → 大概率是多字段模式
+        # 直接使用 outputs 作为 card_data（只取匹配的字段）
+        card_data = {k: outputs[k] for k in matching_fields if outputs[k]}
+        # 👆 过滤掉空值
+        return card_data, "multi_field"
+
+    # ===== 策略 B：单 JSON 模式检测 =====
+    # 遍历所有输出值，尝试把每个字符串值解析成 JSON
+    for key, value in outputs.items():
+        if isinstance(value, str):
+            parsed = _parse_card_json(value)
+            if parsed and len(parsed) >= 2:
+                # 至少有 2 个字段 → 是有效的卡片 JSON
+                return parsed, "single_json"
+
+    # ===== 兜底：取第一个非空字符串作为 raw_text =====
+    for key, value in outputs.items():
+        if isinstance(value, str) and value.strip():
+            return {"raw_text": value}, "fallback"
+
+    return {}, "empty"
 
 
 # ========================== 第三段：配置网页基本信息 ==========================
@@ -256,7 +371,9 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
         status_placeholder.info("🤖 正在连接 Dify 工作流...")
         # 👆 显示蓝色信息提示
 
-        answer_text = ""  # 👆 存储 AI 返回的最终文本
+        workflow_outputs = {}  # 👆 存储工作流最终输出的完整 outputs 字典
+        card_data = {}  # 👆 提取后的卡片数据
+        extract_mode = ""  # 👆 提取模式（single_json / multi_field / empty）
         workflow_id = ""  # 👆 存储工作流运行 ID
 
         # ========== 用流式模式调用 Dify 工作流 ==========
@@ -297,32 +414,25 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
 
             # ===== 情况5：整个工作流完成 =====
             elif event_type == "workflow_finished":
-                # ---------- 从返回数据中提取 AI 生成的文本 ----------
+                # ---------- 保存完整的 outputs 字典 ----------
                 # Dify workflow streaming 返回的结构：
                 # event.data.outputs 里包含所有输出变量
-                data = event.get("data") or {}
-                outputs = data.get("outputs") or {}
-                # 👆 防御性编程：如果任何一层是 None，用空字典替代
+                raw_data = event.get("data") or {}
+                workflow_outputs = raw_data.get("outputs") or {}
+                # 👆 保存完整 outputs，后续用 _extract_card_data_from_outputs 智能提取
 
-                # 优先找名为 "text" 的输出变量（本工作流的输出变量名）
-                answer_text = outputs.get("text", "")
-
-                # 如果 "text" 不存在，遍历所有输出找第一个字符串值
-                if not answer_text:
-                    for key, value in outputs.items():
-                        if isinstance(value, str):  # 👆 检查是不是字符串类型
-                            answer_text = value
-                            break  # 👆 找到第一个就停
+                # ---------- 用智能提取函数处理 ----------
+                card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
 
                 status_placeholder.empty()  # 👆 清空进度提示
 
-                if answer_text:
-                    st.success("✅ 生成完成！")
+                if extract_mode != "empty":
+                    field_count = len(card_data)
+                    st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
                 else:
-                    # 如果没提取到内容，显示调试信息
                     st.warning("⚠️ 未提取到输出内容")
-                    with st.expander("调试：workflow_finished 原始事件"):
-                        st.json(event)  # 👆 展开查看原始事件数据
+                    with st.expander("🔍 调试：workflow_finished 原始事件"):
+                        st.json(event)
 
             # ===== 情况6：心跳（ping） =====
             elif event_type == "ping":
@@ -330,15 +440,91 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
 
         # ===== 循环结束，展示最终结果 =====
 
-        if answer_text:
-            # ---------- 有内容：展示 AI 的输出 ----------
-            st.subheader("📄 生成结果")
-            st.markdown(answer_text)
-            # 👆 st.markdown 渲染 Markdown 格式，支持粗体、标题、列表等美化
+        # ---------- 判断 card_data 是否包含有效的卡片字段 ----------
+        # 有效字段：title、quote、summary 中的至少一个
+        card_field_names = {"title", "quote", "summary"}
+        has_card_fields = bool(card_field_names & set(card_data.keys()))
+        # 👆 取交集：card_data 的 key 中有多少个是有效的卡片字段名
+
+        if card_data and has_card_fields:
+            # ---------- 有卡片数据：生成并展示图片 ----------
+            st.subheader("🖼️ 生成的卡片")
+
+            # ===== 调试面板：查看数据链路每一步 =====
+            with st.expander("🔍 调试：查看数据链路"):
+                tab1, tab2, tab3 = st.tabs(["Dify Outputs", "提取模式", "Card Data"])
+
+                with tab1:
+                    st.caption("Dify 工作流返回的原始 outputs：")
+                    st.json(workflow_outputs)
+                    # 👆 看看 Dify 到底输出了哪些变量，叫什么名字
+
+                with tab2:
+                    st.caption(f"提取模式：**{extract_mode}**")
+                    if extract_mode == "multi_field":
+                        st.info("""
+                        **多字段模式**：Dify 工作流把 title、quote、summary、book、movie
+                        等字段作为独立的输出变量。前端会自动把它们合并成卡片数据。
+                        """)
+                    elif extract_mode == "single_json":
+                        st.info("""
+                        **单 JSON 模式**：Dify 工作流把整个卡片设计打包成一个 JSON 字符串输出。
+                        前端解析这个 JSON 得到卡片数据。
+                        """)
+                    else:
+                        st.warning(f"未知模式: {extract_mode}")
+
+                with tab3:
+                    st.json(card_data)
+                    # 👆 最终用来生成图片的数据
+
+            # ===== 生成图片 =====
+            try:
+                with st.spinner("🎨 正在渲染卡片图片..."):
+                    card_image = generate_card_image(card_data)
+
+                # ===== 展示图片 =====
+                st.image(
+                    card_image,
+                    caption=card_data.get("title", "知识卡片"),
+                    use_container_width=True,
+                )
+
+                # ===== 下载按钮 =====
+                buf = io.BytesIO()
+                card_image.save(buf, format="PNG")
+                buf.seek(0)
+
+                download_filename = f"{card_data.get('title', '知识卡片')}.png"
+                st.download_button(
+                    label="📥 下载卡片图片",
+                    data=buf.getvalue(),
+                    file_name=download_filename,
+                    mime="image/png",
+                    use_container_width=True,
+                )
+
+            except Exception as img_error:
+                st.error(f"❌ 图片生成失败: {str(img_error)}")
+                st.warning("回退为 JSON 展示：")
+                st.json(card_data)
+
+        elif card_data:
+            # ---------- card_data 有内容但缺少有效卡片字段（如只有 raw_text） ----------
+            st.warning("⚠️ 输出数据缺少卡片字段（title/quote/summary），以原始数据展示：")
+            with st.expander("🔍 调试：查看原始数据"):
+                st.caption("Dify 原始 outputs：")
+                st.json(workflow_outputs)
+                st.caption("提取后的 card_data：")
+                st.json(card_data)
+            raw_text = card_data.get("raw_text", json.dumps(card_data, ensure_ascii=False))
+            st.markdown(raw_text)
 
         else:
-            # ---------- 没内容：提示用户 ----------
-            st.warning("⚠️ 工作流完成但未返回内容，请检查 Dify 工作流配置")
+            # ---------- 完全没内容 ----------
+            st.warning("⚠️ 工作流完成但未返回任何内容，请检查 Dify 工作流配置")
+            with st.expander("🔍 调试：workflow_outputs"):
+                st.json(workflow_outputs)
 
         # ---------- 显示工作流 ID（方便追踪） ----------
         if workflow_id:
