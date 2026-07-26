@@ -365,10 +365,10 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
         #    类比：贴了一张便利贴，上面写什么可以随时改
 
         # ---------- 调试信息 ----------
-        st.info(f"调试：input_key={input_key}, 发送内容={inputs}")
+        st.info(f"调试：input_key={input_key}, 模式=fixed（跳过 Dify 调用）")
         # 👆 显示当前实际发送的变量名和内容，方便排查问题
 
-        status_placeholder.info("🤖 正在连接 Dify 工作流...")
+        status_placeholder.info("🤖 正在生成卡片...")
         # 👆 显示蓝色信息提示
 
         workflow_outputs = {}  # 👆 存储工作流最终输出的完整 outputs 字典
@@ -376,67 +376,51 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
         extract_mode = ""  # 👆 提取模式（single_json / multi_field / empty）
         workflow_id = ""  # 👆 存储工作流运行 ID
 
-        # ========== 用流式模式调用 Dify 工作流 ==========
-        # for event in xxx: 意思是"对这个生成器里的每个事件，逐个处理"
-        # run_workflow_streaming 是一个"生成器"（generator），它不一次性返回全部数据
-        # 而是每收到一个事件就 yield 一个，for 循环就能逐个拿到
-        for event in client.run_workflow_streaming(inputs=inputs):
-            # ---------- 获取事件类型 ----------
-            event_type = event.get("event", "")
-            # 👆 从事件中取出 "event" 字段，如果不存在就用空字符串
+        # ========== [临时] 跳过 Dify 调用，使用固定数据节省 tokens ==========
+        # TODO: 恢复 Dify 调用时取消下面的注释
+        # for event in client.run_workflow_streaming(inputs=inputs):
+        #     event_type = event.get("event", "")
+        #     if event_type == "error":
+        #         status_placeholder.empty()
+        #         st.error(f"❌ 生成失败: {event.get('message', '未知错误')}")
+        #         if "status_code" in event:
+        #             st.write(f"**状态码**: {event['status_code']}")
+        #         break
+        #     elif event_type == "workflow_started":
+        #         workflow_id = event.get("workflow_run_id", "")
+        #         status_placeholder.info(f"🚀 工作流已启动 (ID: {workflow_id[:8]}...)")
+        #     elif event_type == "node_started":
+        #         node_title = event.get("data", {}).get("title", "")
+        #         status_placeholder.info(f"⏳ 执行中: {node_title}...")
+        #     elif event_type == "node_finished":
+        #         node_title = event.get("data", {}).get("title", "")
+        #         status_placeholder.success(f"✅ 完成: {node_title}")
+        #     elif event_type == "workflow_finished":
+        #         raw_data = event.get("data") or {}
+        #         workflow_outputs = raw_data.get("outputs") or {}
+        #         card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
+        #         status_placeholder.empty()
+        #         if extract_mode != "empty":
+        #             field_count = len(card_data)
+        #             st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
+        #         else:
+        #             st.warning("⚠️ 未提取到输出内容")
+        #             with st.expander("🔍 调试：workflow_finished 原始事件"):
+        #                 st.json(event)
+        #     elif event_type == "ping":
+        #         pass
 
-            # ===== 情况1：出错了 =====
-            if event_type == "error":
-                status_placeholder.empty()  # 👆 清空状态提示
-                st.error(f"❌ 生成失败: {event.get('message', '未知错误')}")
-                if "status_code" in event:
-                    st.write(f"**状态码**: {event['status_code']}")
-                break  # 👆 出错就跳出循环，不再处理后续事件
-
-            # ===== 情况2：工作流开始了 =====
-            elif event_type == "workflow_started":
-                # 获取运行 ID（方便追踪这次执行）
-                workflow_id = event.get("workflow_run_id", "")
-                status_placeholder.info(f"🚀 工作流已启动 (ID: {workflow_id[:8]}...)")
-                # 👆 [:8] 只显示 ID 的前 8 位，不用显示完整长串
-
-            # ===== 情况3：某个节点开始干活了 =====
-            elif event_type == "node_started":
-                # 获取节点名称
-                node_title = event.get("data", {}).get("title", "")
-                status_placeholder.info(f"⏳ 执行中: {node_title}...")
-                # 👆 告诉用户"现在 AI 在干什么"
-
-            # ===== 情况4：某个节点干完了 =====
-            elif event_type == "node_finished":
-                node_title = event.get("data", {}).get("title", "")
-                status_placeholder.success(f"✅ 完成: {node_title}")
-
-            # ===== 情况5：整个工作流完成 =====
-            elif event_type == "workflow_finished":
-                # ---------- 保存完整的 outputs 字典 ----------
-                # Dify workflow streaming 返回的结构：
-                # event.data.outputs 里包含所有输出变量
-                raw_data = event.get("data") or {}
-                workflow_outputs = raw_data.get("outputs") or {}
-                # 👆 保存完整 outputs，后续用 _extract_card_data_from_outputs 智能提取
-
-                # ---------- 用智能提取函数处理 ----------
-                card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
-
-                status_placeholder.empty()  # 👆 清空进度提示
-
-                if extract_mode != "empty":
-                    field_count = len(card_data)
-                    st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
-                else:
-                    st.warning("⚠️ 未提取到输出内容")
-                    with st.expander("🔍 调试：workflow_finished 原始事件"):
-                        st.json(event)
-
-            # ===== 情况6：心跳（ping） =====
-            elif event_type == "ping":
-                pass  # 👆 "心跳"包，告诉"我还活着"，不需要做任何处理
+        # ===== 使用固定卡片数据（跳过 Dify API 调用） =====
+        card_data = {
+            "title": "偶然表象下的必然积累",
+            "quote": "所谓运气，不过是长期主义在时间维度上的显影",
+            "summary": "成功并非纯粹的运气博弈，而是持续行动与因果律的精确兑现。",
+            "book": "《纳瓦尔宝典》",
+            "movie": "《肖申克的救赎》",
+        }
+        extract_mode = "fixed"
+        status_placeholder.empty()
+        st.success("✅ 卡片数据已就绪（固定数据模式）")
 
         # ===== 循环结束，展示最终结果 =====
 
@@ -487,7 +471,7 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
                 st.image(
                     card_image,
                     caption=card_data.get("title", "知识卡片"),
-                    use_container_width=True,
+                    width=400,
                 )
 
                 # ===== 下载按钮 =====

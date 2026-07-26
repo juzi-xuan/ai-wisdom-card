@@ -28,9 +28,12 @@ import io  # 👉 io 是"内存读写器"：把图片临时存在内存里，不
 import math  # 👉 math 是"数学小助手"：帮你做各种数学计算（三角函数、圆周率等）
 import textwrap  # 👉 textwrap 是"文字排版员"：自动把长文字切成一行一行的
 import re  # 👉 re 是"文字侦探"：用正则表达式在文本中查找匹配的内容
+import os  # 👉 os 是"操作系统小助手"：读取文件夹、路径等
+import random  # 👉 random 是"随机数生成器"：随机选背景图
+from pathlib import Path  # 👉 Path 是"地图导航"：处理文件路径
 from typing import Dict, Any, Optional, List, Tuple  # 👉 类型标签
 
-from PIL import Image, ImageDraw, ImageFont  # 👉 Pillow 图片处理三件套
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance  # 👉 Pillow 图片处理三件套
 from loguru import logger  # 👉 日记本
 
 
@@ -38,7 +41,7 @@ from loguru import logger  # 👉 日记本
 # 把常用的数值定义成常量（全大写），方便统一修改
 
 # ---------- 画布尺寸（类似手机屏幕比例） ----------
-CARD_WIDTH = 800  # 👈 画布宽度（像素）
+CARD_WIDTH = 900  # 👈 画布宽度（像素）—— 高清渲染，前端显示时缩放
 CARD_HEIGHT = 1200  # 👈 画布高度（像素）
 
 # ---------- 配色方案：极简哲思风 ----------
@@ -54,6 +57,10 @@ COLOR_ACCENT = "#5B8DEF"  # 👈 强调蓝：蓝色点缀（用于链接符号�
 PADDING_H = 60  # 👈 左右内边距（像素）
 PADDING_V = 50  # 👈 上下内边距（像素）
 LINE_SPACING_RATIO = 1.6  # 👈 行间距倍数（相对于字号，1.6 = 行高的 1.6 倍）
+
+# ---------- 背景图片配置 ----------
+BACKGROUNDS_DIR = Path(__file__).parent.parent / "assets" / "backgrounds"
+OVERLAY_ALPHA = 140  # 👈 遮罩透明度（0=全透明, 255=全黑，140 ≈ 55% 不透明度）
 
 
 # ========================== 第三段：字体加载工具 ==========================
@@ -371,15 +378,10 @@ class CardImageGenerator:
 
         logger.info(f"开始生成卡片: title='{title[:20]}...', highlight={highlight_words}")
 
-        # ========== 第一层：创建画布（"铺画纸"） ==========
-        # 使用 RGBA 模式（R=红, G=绿, B=蓝, A=透明度）
-        # 背景色是深蓝黑
-        img = Image.new("RGBA", (self.width, self.height), COLOR_BG)
+        # ========== 第一层：加载背景图（"铺画纸"） ==========
+        img = self._load_background()
         draw = ImageDraw.Draw(img)
         # 👆 ImageDraw.Draw(img) 拿到"画笔"，所有绘制操作都通过它
-
-        # ========== 第二层：绘制背景装饰（"打底妆"） ==========
-        self._draw_background(draw)
 
         # ========== 第三层：从下往上布局 ==========
         # 采用"从下往上"的布局策略：先画底部，因为底部内容多
@@ -479,6 +481,57 @@ class CardImageGenerator:
     # =====================================================================
     # 以下是各个"绘制模块"（就像不同的画笔，各画各的部分）
     # =====================================================================
+
+    def _load_background(self) -> Image.Image:
+        """
+        加载背景图片并叠加半透明遮罩
+
+        从 assets/backgrounds/ 随机选一张图，缩放裁剪到卡片尺寸，
+        然后盖一层半透明深色遮罩，保证文字可读性。
+
+        返回：
+            RGBA 模式的 Image 对象（卡片尺寸）
+        """
+        bg_path = None
+
+        # ---------- 尝试从 backgrounds 文件夹随机选一张图 ----------
+        if BACKGROUNDS_DIR.exists():
+            bg_files = [
+                f for f in BACKGROUNDS_DIR.iterdir()
+                if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+            ]
+            if bg_files:
+                bg_path = random.choice(bg_files)
+                logger.info(f"选中背景图: {bg_path.name}")
+
+        # ---------- 如果没有背景图，退回纯色背景 ----------
+        if bg_path is None:
+            logger.warning("未找到背景图，使用纯色背景")
+            return Image.new("RGBA", (self.width, self.height), COLOR_BG)
+
+        # ---------- 加载并适配尺寸（居中裁剪） ----------
+        bg = Image.open(bg_path).convert("RGB")
+        # 计算缩放比例：确保背景图能覆盖整个卡片（不留黑边）
+        scale_w = self.width / bg.width
+        scale_h = self.height / bg.height
+        scale = max(scale_w, scale_h)  # 👈 用较大的缩放比，确保覆盖
+
+        new_w = int(bg.width * scale)
+        new_h = int(bg.height * scale)
+        bg = bg.resize((new_w, new_h), Image.LANCZOS)
+
+        # 居中裁剪到卡片尺寸
+        left = (new_w - self.width) // 2
+        top = (new_h - self.height) // 2
+        bg = bg.crop((left, top, left + self.width, top + self.height))
+
+        # ---------- 叠加半透明深色遮罩（保证文字可读） ----------
+        overlay = Image.new("RGBA", (self.width, self.height), (0, 0, 0, OVERLAY_ALPHA))
+        bg_rgba = bg.convert("RGBA")
+        img = Image.alpha_composite(bg_rgba, overlay)
+
+        logger.info(f"背景图加载完成: {bg_path.name}, 尺寸={self.width}x{self.height}")
+        return img
 
     def _draw_background(self, draw: ImageDraw.Draw):
         """
