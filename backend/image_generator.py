@@ -670,8 +670,8 @@ class CardImageGenerator:
 
         这是卡片的"灵魂"，用较大的字号和醒目的颜色。
 
-        如果引用中包含高亮词，会尝试用粗体+金色渲染（尽力而为，因为
-        Pillow 不支持单行内多字体混排，这里采用整体渲染的方式）。
+        特殊处理：如果引用中包含"——"，则将破折号后的出处文字
+        换行并居右显示，模拟传统引文排版风格。
 
         参数：
             draw    : 画笔
@@ -693,9 +693,20 @@ class CardImageGenerator:
             font = self.font_quote
             color = COLOR_GOLD_LIGHT
 
+        # ---------- 检测破折号，分离出处文字 ----------
+        dash_separator = "——"
+        attribution = None
+        main_quote = quote
+
+        if dash_separator in quote:
+            parts = quote.split(dash_separator, 1)  # 👆 最多分割一次
+            main_quote = parts[0].rstrip()  # 👆 去掉主引文末尾空格
+            attribution = "——" + parts[1].lstrip()  # 👆 出处保留破折号前缀
+
+        # ---------- 绘制主引文（居中） ----------
         y = _draw_multiline_text(
             draw,
-            quote,
+            main_quote,
             y_start,
             font,
             color,
@@ -704,6 +715,22 @@ class CardImageGenerator:
             self._padding_h,
             align="center",
         )
+
+        # ---------- 如果有出处文字，换行居右显示 ----------
+        if attribution:
+            y += int(8 * self._scale)  # 👆 主引文和出处之间的间距
+            _draw_multiline_text(
+                draw,
+                attribution,
+                y,
+                font,  # 👆 出处用和主引文一样大的字体
+                COLOR_TEXT_DIM,  # 👆 出处用暗灰色
+                quote_max_width,
+                self.width,
+                self._padding_h,
+                align="right",
+            )
+            y += int(self.font_source.size * LINE_SPACING_RATIO)
 
         return y + int(10 * self._scale)
 
@@ -785,7 +812,7 @@ class CardImageGenerator:
             关键词区域顶部 Y 坐标
         """
         # ---------- 先构建标签文字总行 ----------
-        tag_line = "  ".join([f"#{kw}" for kw in keywords])
+        tag_line = "  ·  ".join(keywords)
 
         # ---------- 检查是否会超宽 ----------
         tag_width = self.font_keyword.getlength(tag_line)
