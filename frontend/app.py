@@ -365,7 +365,7 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
         #    类比：贴了一张便利贴，上面写什么可以随时改
 
         # ---------- 调试信息 ----------
-        st.info(f"调试：input_key={input_key}, 模式=fixed（跳过 Dify 调用）")
+        st.info(f"调试：input_key={input_key}, 模式=dify（正在调用 Dify 工作流）")
         # 👆 显示当前实际发送的变量名和内容，方便排查问题
 
         status_placeholder.info("🤖 正在生成卡片...")
@@ -376,53 +376,52 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
         extract_mode = ""  # 👆 提取模式（single_json / multi_field / empty）
         workflow_id = ""  # 👆 存储工作流运行 ID
 
-        # ========== [临时] 跳过 Dify 调用，使用固定数据节省 tokens ==========
-        # TODO: 恢复 Dify 调用时取消下面的注释
-        # for event in client.run_workflow_streaming(inputs=inputs):
-        #     event_type = event.get("event", "")
-        #     if event_type == "error":
-        #         status_placeholder.empty()
-        #         st.error(f"❌ 生成失败: {event.get('message', '未知错误')}")
-        #         if "status_code" in event:
-        #             st.write(f"**状态码**: {event['status_code']}")
-        #         break
-        #     elif event_type == "workflow_started":
-        #         workflow_id = event.get("workflow_run_id", "")
-        #         status_placeholder.info(f"🚀 工作流已启动 (ID: {workflow_id[:8]}...)")
-        #     elif event_type == "node_started":
-        #         node_title = event.get("data", {}).get("title", "")
-        #         status_placeholder.info(f"⏳ 执行中: {node_title}...")
-        #     elif event_type == "node_finished":
-        #         node_title = event.get("data", {}).get("title", "")
-        #         status_placeholder.success(f"✅ 完成: {node_title}")
-        #     elif event_type == "workflow_finished":
-        #         raw_data = event.get("data") or {}
-        #         workflow_outputs = raw_data.get("outputs") or {}
-        #         card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
-        #         status_placeholder.empty()
-        #         if extract_mode != "empty":
-        #             field_count = len(card_data)
-        #             st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
-        #         else:
-        #             st.warning("⚠️ 未提取到输出内容")
-        #             with st.expander("🔍 调试：workflow_finished 原始事件"):
-        #                 st.json(event)
-        #     elif event_type == "ping":
-        #         pass
+        # ========== 调用 Dify 工作流（流式） ==========
+        for event in client.run_workflow_streaming(inputs=inputs):
+            event_type = event.get("event", "")
+            if event_type == "error":
+                status_placeholder.empty()
+                st.error(f"❌ 生成失败: {event.get('message', '未知错误')}")
+                if "status_code" in event:
+                    st.write(f"**状态码**: {event['status_code']}")
+                break
+            elif event_type == "workflow_started":
+                workflow_id = event.get("workflow_run_id", "")
+                status_placeholder.info(f"🚀 工作流已启动 (ID: {workflow_id[:8]}...)")
+            elif event_type == "node_started":
+                node_title = event.get("data", {}).get("title", "")
+                status_placeholder.info(f"⏳ 执行中: {node_title}...")
+            elif event_type == "node_finished":
+                node_title = event.get("data", {}).get("title", "")
+                status_placeholder.success(f"✅ 完成: {node_title}")
+            elif event_type == "workflow_finished":
+                raw_data = event.get("data") or {}
+                workflow_outputs = raw_data.get("outputs") or {}
+                card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
+                status_placeholder.empty()
+                if extract_mode != "empty":
+                    field_count = len(card_data)
+                    st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
+                else:
+                    st.warning("⚠️ 未提取到输出内容")
+                    with st.expander("🔍 调试：workflow_finished 原始事件"):
+                        st.json(event)
+            elif event_type == "ping":
+                pass
 
-        # ===== 使用固定卡片数据（跳过 Dify API 调用） =====
-        card_data = {
-            "title": "偶然表象下的必然积累",
-            "quote": "真的猛士，敢于直面惨淡的人生，敢于正视淋漓的鲜血。——《记念刘和珍君》",
-            "source_quote": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。——罗曼·罗兰",
-            "summary": "成功并非纯粹的运气博弈，而是持续行动与因果律的精确兑现。",
-            "book": "《纳瓦尔宝典》",
-            "movie": "《肖申克的救赎》",
-            "keywords": "运气、长期主义、因果律、持续行动",
-        }
-        extract_mode = "fixed"
-        status_placeholder.empty()
-        st.success("✅ 卡片数据已就绪（固定数据模式）")
+        # ===== [保留] 使用固定卡片数据（跳过 Dify API 调用）—— 后续测试用 =====
+        # card_data = {
+        #     "title": "偶然表象下的必然积累",
+        #     "quote": "真的猛士，敢于直面惨淡的人生，敢于正视淋漓的鲜血。——《记念刘和珍君》",
+        #     "source_quote": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。——罗曼·罗兰",
+        #     "summary": "成功并非纯粹的运气博弈，而是持续行动与因果律的精确兑现。",
+        #     "book": "《纳瓦尔宝典》",
+        #     "movie": "《肖申克的救赎》",
+        #     "keywords": "运气、长期主义、因果律、持续行动",
+        # }
+        # extract_mode = "fixed"
+        # status_placeholder.empty()
+        # st.success("✅ 卡片数据已就绪（固定数据模式）")
 
         # ===== 循环结束，展示最终结果 =====
 

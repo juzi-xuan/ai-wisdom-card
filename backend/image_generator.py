@@ -20,8 +20,8 @@ CARD_WIDTH = 1080
 CARD_HEIGHT = 1440
 
 # ---------- 配色体系（三主色） ----------
-COLOR_GOLD = "#E8C77A"        # 主色1：金色（标题、分割线、图标）
-COLOR_CREAM = "#F4EBDD"       # 主色2：米白（正文）
+COLOR_GOLD = "#FFD700"        # 主色1：亮金色（标题、分割线、图标），比原来更亮
+COLOR_CREAM = "#FFFFFF"       # 主色2：纯白色（正文），比原来更亮
 COLOR_DEEP_PURPLE = "#292747" # 主色3：深紫（卡片背景）
 
 # 背景渐变色
@@ -39,7 +39,8 @@ LINE_SPACING_RATIO = 1.6
 
 # ---------- 背景图片 ----------
 BACKGROUNDS_DIR = Path(__file__).parent.parent / "assets" / "backgrounds"
-OVERLAY_ALPHA = 140
+ICONS_DIR = Path(__file__).parent.parent / "assets" / "icons"
+OVERLAY_ALPHA = 160
 
 # ---------- 布局区域高度比例 ----------
 ZONE_RATIOS = [0.20, 0.17, 0.18, 0.15, 0.10, 0.15]
@@ -78,6 +79,72 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
+def _load_random_icon(icon_size: int) -> Optional[Image.Image]:
+    """
+    随机加载一个图标文件（就像从玩具箱里随机拿一个玩具）
+
+    这个函数的作用：
+        去 assets/icons/ 文件夹里找图标文件，
+        随机选一个，调整大小后交给调用者。
+        如果文件夹不存在或者里面没文件，就返回 None（告诉调用者：没找到哦）
+
+    打个比方：
+        这个函数 = "玩具箱管理员"
+        - ICONS_DIR = "玩具箱"（assets/icons/ 文件夹）
+        - icon_files = "箱子里的玩具列表"
+        - random.choice() = "闭着眼睛从箱子里拿一个"
+        - icon_img = "拿出来的玩具"
+
+    参数：
+        icon_size: 图标要变成多大（正方形，比如 60 就变成 60x60 像素）
+
+    返回：
+        调整好大小的图标图片；如果没找到图标，返回 None
+    """
+    # ===== 第一步：检查玩具箱（文件夹）有没有 =====
+    if not ICONS_DIR.exists():
+        # 👆 ICONS_DIR.exists() 检查文件夹是否存在
+        # 如果文件夹都没有，就直接返回 None（告诉调用者：没找到玩具箱）
+        logger.debug(f"图标目录不存在: {ICONS_DIR}")
+        return None
+
+    # ===== 第二步：从玩具箱里挑出所有"合格的玩具"（图标文件） =====
+    # 支持的图标格式：PNG、JPG、WebP
+    icon_files = [
+        f for f in ICONS_DIR.iterdir()
+        # 👆 ICONS_DIR.iterdir() 把文件夹里所有文件都列出来
+        if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
+        # 👆 只挑后缀是这些的文件，就像只挑"玩具车"，不要"书"和"衣服"
+    ]
+
+    # ===== 第三步：检查玩具箱里有没有玩具 =====
+    if not icon_files:
+        # 👆 如果 icon_files 是空列表（里面什么都没有）
+        logger.debug(f"图标目录为空: {ICONS_DIR}")
+        return None  # 告诉调用者：玩具箱是空的
+
+    # ===== 第四步：闭着眼睛随机拿一个玩具 =====
+    icon_path = random.choice(icon_files)
+    # 👆 random.choice() = 随机选择，就像抽奖一样
+    logger.info(f"选中图标: {icon_path.name}")
+
+    # ===== 第五步：把玩具拿出来，整理好（打开图片并调整大小） =====
+    try:
+        # 🖼️ 打开图片文件，就像拆开玩具包装
+        icon_img = Image.open(icon_path).convert("RGBA")
+        # 👆 convert("RGBA") 让图片支持透明背景（就像玩具可以有透明的翅膀）
+
+        # 把图片调整到指定大小，就像把大玩具缩小到合适的尺寸
+        icon_img = icon_img.resize((icon_size, icon_size), Image.LANCZOS)
+        # 👆 Image.LANCZOS 是一种高级的缩放方法，能让图片缩小后依然清晰
+
+        return icon_img  # 把整理好的玩具交给调用者
+    except Exception as e:
+        # 如果打开图片失败（比如文件损坏），就记录错误并返回 None
+        logger.warning(f"加载图标失败: {icon_path.name}, 错误: {e}")
+        return None
+
+
 # ========================== 文字工具 ==========================
 
 def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
@@ -108,9 +175,20 @@ def _draw_text_spaced(
     font: ImageFont.FreeTypeFont,
     color: str,
     spacing: int = 20,
+    stroke_color: str = "#000000",
+    stroke_width: int = 0,
 ) -> int:
-    """绘制带字间距的文字，返回底部y"""
+    """绘制带字间距的文字（可带描边），返回底部y
+
+    参数：
+        stroke_color: 描边颜色，默认黑色
+        stroke_width: 描边宽度，0表示不描边
+    """
     for char in text:
+        if stroke_width > 0:
+            # 先画描边（在文字周围画一圈深色）
+            draw.text((x, y), char, fill=stroke_color, font=font, stroke_width=stroke_width)
+        # 再画文字主体（覆盖在描边上）
         draw.text((x, y), char, fill=color, font=font)
         x += int(font.getlength(char)) + spacing
     return y + int(font.size * 1.4)
@@ -141,12 +219,14 @@ def _draw_centered_text(
     color: str,
     canvas_width: int,
     spacing: int = 15,
+    stroke_color: str = "#1a1a2e",
+    stroke_width: int = 0,
 ) -> int:
-    """绘制居中带字间距的文字，返回底部y"""
+    """绘制居中带字间距的文字（可带描边），返回底部y"""
     # 计算总宽度
     total_w = sum(int(font.getlength(c)) + spacing for c in text) - spacing
     x = (canvas_width - total_w) // 2
-    return _draw_text_spaced(draw, text, x, y, font, color, spacing)
+    return _draw_text_spaced(draw, text, x, y, font, color, spacing, stroke_color, stroke_width)
 
 
 def _draw_multiline_centered(
@@ -158,14 +238,20 @@ def _draw_multiline_centered(
     canvas_width: int,
     max_width: int = 800,
     line_spacing: Optional[int] = None,
+    stroke_color: str = "#1a1a2e",
+    stroke_width: int = 0,
 ) -> int:
-    """绘制居中多行文字，返回底部y"""
+    """绘制居中多行文字（可带描边），返回底部y"""
     lines = _wrap_text(text, font, max_width)
     if line_spacing is None:
         line_spacing = int(font.size * LINE_SPACING_RATIO)
 
     center_x = canvas_width // 2
     for line in lines:
+        if stroke_width > 0:
+            # 先画描边
+            draw.text((center_x, y), line, fill=stroke_color, font=font, anchor="ma", stroke_width=stroke_width)
+        # 再画文字主体
         draw.text((center_x, y), line, fill=color, font=font, anchor="ma")
         y += line_spacing
     return y
@@ -335,7 +421,7 @@ class CardImageGenerator:
         if quote:
             self._draw_quote_card(
                 draw, quote, zones["quote1"],
-                bg_alpha=60,  # 半透明磨砂
+                bg_alpha=120,  # 半透明磨砂，提高透明度增强文字对比度
                 icon_text="✦",
             )
 
@@ -343,7 +429,7 @@ class CardImageGenerator:
         if source_quote:
             self._draw_quote_card(
                 draw, source_quote, zones["quote2"],
-                bg_alpha=100,  # 更深
+                bg_alpha=160,  # 更深，提高透明度增强文字对比度
                 icon_text="✧",
             )
 
@@ -399,7 +485,7 @@ class CardImageGenerator:
     # ==================== 区域绘制 ====================
 
     def _draw_title(self, draw: ImageDraw.Draw, title: str, zone: dict):
-        """标题：左对齐，带字间距，两行不同字号"""
+        """标题：左对齐，带字间距，两行不同字号，带描边增强清晰度"""
         lines = _split_title_lines(title)
 
         x_start = int(180 * self._scale)
@@ -409,7 +495,9 @@ class CardImageGenerator:
             font = self.font_title_line1 if i == 0 else self.font_title_line2
             y = _draw_text_spaced(
                 draw, line, x_start, y, font, COLOR_GOLD,
-                spacing=int(20 * self._scale)
+                spacing=int(20 * self._scale),
+                stroke_color="#1a1a2e",  # 深紫色描边
+                stroke_width=int(2 * self._scale)  # 描边宽度，让文字更清晰
             )
 
     def _draw_quote_card(
@@ -434,7 +522,7 @@ class CardImageGenerator:
         card_draw.rounded_rectangle(
             [0, 0, card_w, card_h],
             radius=border_radius,
-            outline=(232, 199, 122, 100),
+            outline=(232, 199, 122, 150),
             width=max(1, int(1 * self._scale))
         )
         # 创建全尺寸overlay并粘贴卡片
@@ -444,26 +532,72 @@ class CardImageGenerator:
         composite = Image.alpha_composite(base_rgba, full_overlay)
         draw._image.paste(composite, (0, 0))
 
-        # ---------- 左侧图标（圆形背景+图标） ----------
+        # ---------- 左侧图标（优先加载图标文件，回退到圆球+文字） ----------
+        # 📐 计算图标大小和位置
         icon_size = int(60 * self._scale)
+        # 👆 图标大小是 60x60 像素（乘以缩放比例），就像一个小徽章
         icon_bg_x = card_x + int(50 * self._scale)
+        # 👆 图标左边距离卡片左边 50 像素（留出一点空隙）
         icon_bg_y = card_y + (card_h - icon_size) // 2
+        # 👆 图标垂直居中：卡片高度减去图标高度，除以 2，就是上边距
 
-        icon_overlay = Image.new("RGBA", (icon_size, icon_size), (0, 0, 0, 0))
-        icon_draw = ImageDraw.Draw(icon_overlay)
-        icon_draw.ellipse([0, 0, icon_size, icon_size], fill=(232, 199, 122, 60))
-        full_icon = Image.new("RGBA", draw._image.size, (0, 0, 0, 0))
-        full_icon.paste(icon_overlay, (icon_bg_x, icon_bg_y))
-        base_rgba = draw._image.convert("RGBA")
-        composite = Image.alpha_composite(base_rgba, full_icon)
-        draw._image.paste(composite, (0, 0))
+        # 🎲 尝试从图标文件夹里随机拿一个图标
+        icon_img = _load_random_icon(icon_size)
+        # 👆 调用玩具箱管理员，让它随机拿一个玩具（图标）
 
-        # 图标文字
-        icon_font = _load_font(max(8, int(28 * self._scale)))
-        draw.text(
-            (icon_bg_x + icon_size // 2, icon_bg_y + icon_size // 2),
-            icon_text, fill=COLOR_GOLD, font=icon_font, anchor="mm"
-        )
+        if icon_img is not None:
+            # ✅ 拿到了图标！直接把图标贴到卡片上
+
+            # 把卡片图片转换成支持透明的模式（RGBA）
+            base_rgba = draw._image.convert("RGBA")
+            # 👆 RGBA = 红、绿、蓝、透明度，就像给图片加了一层"透明魔法"
+
+            # 创建一个全透明的画布，用来放图标
+            full_icon = Image.new("RGBA", draw._image.size, (0, 0, 0, 0))
+            # 👆 (0, 0, 0, 0) = 黑色但完全透明（看不见）
+
+            # 把图标贴到画布的指定位置
+            full_icon.paste(icon_img, (icon_bg_x, icon_bg_y), icon_img)
+            # 👆 第三个参数 icon_img 是"蒙版"，用来保留图标的透明部分
+            #    就像贴贴纸时，只贴有图案的地方，透明的地方不会盖住下面
+
+            # 把图标画布和卡片图片合并
+            composite = Image.alpha_composite(base_rgba, full_icon)
+            # 👆 alpha_composite = 透明合并，让两个图片重叠时透明部分正常显示
+
+            # 把合并后的图片放回原来的卡片上
+            draw._image.paste(composite, (0, 0))
+
+        else:
+            # ❌ 没找到图标！那就用老办法：画一个圆球，上面写个字
+
+            # 创建一个透明的小圆画布，用来画圆球
+            icon_overlay = Image.new("RGBA", (icon_size, icon_size), (0, 0, 0, 0))
+            icon_draw = ImageDraw.Draw(icon_overlay)
+
+            # 在小圆画布上画一个金色的圆形（圆球背景）
+            icon_draw.ellipse([0, 0, icon_size, icon_size], fill=(232, 199, 122, 100))
+            # 👆 ellipse = 椭圆，这里画的是正圆（因为宽高一样）
+            #    fill=(232, 199, 122, 100) = 金色，透明度 100（半透明）
+
+            # 把小圆画布放到卡片的全大图上
+            full_icon = Image.new("RGBA", draw._image.size, (0, 0, 0, 0))
+            full_icon.paste(icon_overlay, (icon_bg_x, icon_bg_y))
+
+            # 合并到卡片上
+            base_rgba = draw._image.convert("RGBA")
+            composite = Image.alpha_composite(base_rgba, full_icon)
+            draw._image.paste(composite, (0, 0))
+
+            # 在圆球中间写一个装饰符号（比如 ✦ 或 ✧）
+            icon_font = _load_font(max(8, int(28 * self._scale)))
+            # 👆 加载字体，大小是 28 像素
+            draw.text(
+                (icon_bg_x + icon_size // 2, icon_bg_y + icon_size // 2),
+                # 👆 坐标：图标左上角 + 图标大小的一半 = 正中间
+                icon_text, fill=COLOR_GOLD, font=icon_font, anchor="mm"
+                # 👆 anchor="mm" = 文字中心点对齐坐标点（就像把字放在靶心）
+            )
 
         # ---------- 正文（左对齐） ----------
         text_x = card_x + int(130 * self._scale)
@@ -478,40 +612,50 @@ class CardImageGenerator:
             main_quote = parts[0].rstrip()
             author = "\u2014\u2014" + parts[1].lstrip()
 
-        # 绘制引文
+        # 绘制引文（带描边增强清晰度）
         y_text = card_y + int(30 * self._scale)
         lines = _wrap_text(main_quote, self.font_quote, text_max_w)
         line_spacing = int(self.font_quote.size * 1.5)
+        stroke_width = int(1 * self._scale)  # 描边宽度
 
         for line in lines:
+            # 先画描边，让文字更清晰
+            draw.text((text_x, y_text), line, fill="#1a1a2e", font=self.font_quote, stroke_width=stroke_width)
+            # 再画文字主体
             draw.text((text_x, y_text), line, fill=COLOR_CREAM, font=self.font_quote)
             y_text += line_spacing
 
-        # ---------- 作者（右下角） ----------
+        # ---------- 作者（右下角，带描边） ----------
         if author:
             author_font = self.font_quote_author
             author_w = int(author_font.getlength(author))
             author_x = card_x + card_w - int(50 * self._scale) - author_w
             author_y = card_y + card_h - int(40 * self._scale)
+            # 先画描边
+            draw.text((author_x, author_y), author, fill="#1a1a2e", font=author_font, stroke_width=stroke_width)
+            # 再画文字主体
             draw.text((author_x, author_y), author, fill=COLOR_GOLD, font=author_font)
 
     def _draw_summary(self, draw: ImageDraw.Draw, summary: str, zone: dict):
-        """AI解读区域"""
+        """AI解读区域，带描边增强清晰度"""
         y = zone["y_start"] + int(10 * self._scale)
+        stroke_width = int(1 * self._scale)
 
-        # 标题
+        # 标题（带描边）
         y = _draw_centered_text(
             draw, "— AI解读 —", y,
             self.font_summary_title, COLOR_GOLD,
-            self.width, spacing=int(15 * self._scale)
+            self.width, spacing=int(15 * self._scale),
+            stroke_width=stroke_width
         )
         y += int(20 * self._scale)
 
-        # 正文
+        # 正文（带描边）
         _draw_multiline_centered(
             draw, summary, y,
             self.font_summary, COLOR_CREAM,
-            self.width, max_width=int(800 * self._scale)
+            self.width, max_width=int(800 * self._scale),
+            stroke_width=stroke_width
         )
 
     def _draw_keywords(self, draw: ImageDraw.Draw, keywords: List[str], zone: dict):
@@ -549,12 +693,12 @@ class CardImageGenerator:
             tag_draw.rounded_rectangle(
                 [0, 0, tag_w_int, tag_height],
                 radius=border_radius,
-                fill=(41, 39, 71, 120)
+                fill=(41, 39, 71, 180)
             )
             tag_draw.rounded_rectangle(
                 [0, 0, tag_w_int, tag_height],
                 radius=border_radius,
-                outline=(232, 199, 122, 180),
+                outline=(232, 199, 122, 220),
                 width=max(1, int(1 * self._scale))
             )
             base_rgba = draw._image.convert("RGBA")
@@ -563,45 +707,51 @@ class CardImageGenerator:
             composite = Image.alpha_composite(base_rgba, tag_full)
             draw._image.paste(composite, (0, 0))
 
-            # 图标
+            # 图标（带描边）
             icon_x = x_int + tag_padding_h
             icon_y = y_center - self.font_tag_icon.size // 2
+            draw.text((icon_x, icon_y), icon, fill="#1a1a2e", font=self.font_tag_icon, stroke_width=int(1 * self._scale))
             draw.text((icon_x, icon_y), icon, fill=COLOR_GOLD, font=self.font_tag_icon)
 
-            # 文字
+            # 文字（带描边）
             text_x = icon_x + int(self.font_tag_icon.getlength(icon)) + int(6 * self._scale)
             text_y = y_center - self.font_tag.size // 2
+            draw.text((text_x, text_y), text, fill="#1a1a2e", font=self.font_tag, stroke_width=int(1 * self._scale))
             draw.text((text_x, text_y), text, fill=COLOR_CREAM, font=self.font_tag)
 
             x += tag_w + tag_gap
 
     def _draw_recommend(self, draw: ImageDraw.Draw, book: str, movie: str, zone: dict):
-        """AI推荐区域"""
+        """AI推荐区域，带描边增强清晰度"""
         y = zone["y_start"] + int(10 * self._scale)
+        stroke_width = int(1 * self._scale)
 
-        # 标题
+        # 标题（带描边）
         y = _draw_centered_text(
             draw, "— AI推荐 —", y,
             self.font_rec_title, COLOR_GOLD,
-            self.width, spacing=int(15 * self._scale)
+            self.width, spacing=int(15 * self._scale),
+            stroke_width=stroke_width
         )
         y += int(30 * self._scale)
 
-        # 书名
+        # 书名（带描边）
         if book:
             _draw_multiline_centered(
                 draw, book, y,
                 self.font_rec_name, COLOR_CREAM,
-                self.width
+                self.width,
+                stroke_width=stroke_width
             )
             y += int(self.font_rec_name.size * 1.8)
 
-        # 电影名
+        # 电影名（带描边）
         if movie:
             _draw_multiline_centered(
                 draw, movie, y,
                 self.font_rec_name, COLOR_CREAM,
-                self.width
+                self.width,
+                stroke_width=stroke_width
             )
 
 
