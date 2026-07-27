@@ -27,6 +27,7 @@ import json  # 👉 json 是"翻译官"：能把字符串变成字典、把字�
 import os  # 👉 os 是"操作系统小助手"：读取系统环境变量
 import re  # 👉 re 是"文字侦探"：用正则表达式在文本中查找匹配的内容
 import io  # 👉 io 是"内存读写器"：把图片临时存在内存里，方便下载
+from datetime import datetime  # 👉 datetime 是"时间戳"：生成唯一的文件名
 from pathlib import Path  # 👉 Path 是"地图导航"：处理文件和文件夹路径
 
 import streamlit as st  # 👉 streamlit 是"网页生成器"：把 Python 代码变成网页，简称 st
@@ -50,6 +51,7 @@ load_dotenv(dotenv_path=env_path)  # 👆 把 .env 里的配置读到环境变�
 # 现在 Python 已经知道去 backend/ 找了（前面加了 sys.path）
 from dify_api import DifyClient  # 👆 我们自己写的"AI 对话客户端"
 from image_generator import generate_card_image  # 👆 "卡片印刷机"：把 JSON 变成图片
+from database import get_db, GENERATED_DIR  # 👆 数据库操作和图片保存目录
 
 
 # ========================== 第二段：辅助工具函数 ==========================
@@ -365,7 +367,7 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
         #    类比：贴了一张便利贴，上面写什么可以随时改
 
         # ---------- 调试信息 ----------
-        st.info(f"调试：input_key={input_key}, 模式=dify（正在调用 Dify 工作流）")
+        st.info(f"调试：input_key={input_key}, 模式=fixed（跳过 Dify 调用）")
         # 👆 显示当前实际发送的变量名和内容，方便排查问题
 
         status_placeholder.info("🤖 正在生成卡片...")
@@ -376,52 +378,53 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
         extract_mode = ""  # 👆 提取模式（single_json / multi_field / empty）
         workflow_id = ""  # 👆 存储工作流运行 ID
 
-        # ========== 调用 Dify 工作流（流式） ==========
-        for event in client.run_workflow_streaming(inputs=inputs):
-            event_type = event.get("event", "")
-            if event_type == "error":
-                status_placeholder.empty()
-                st.error(f"❌ 生成失败: {event.get('message', '未知错误')}")
-                if "status_code" in event:
-                    st.write(f"**状态码**: {event['status_code']}")
-                break
-            elif event_type == "workflow_started":
-                workflow_id = event.get("workflow_run_id", "")
-                status_placeholder.info(f"🚀 工作流已启动 (ID: {workflow_id[:8]}...)")
-            elif event_type == "node_started":
-                node_title = event.get("data", {}).get("title", "")
-                status_placeholder.info(f"⏳ 执行中: {node_title}...")
-            elif event_type == "node_finished":
-                node_title = event.get("data", {}).get("title", "")
-                status_placeholder.success(f"✅ 完成: {node_title}")
-            elif event_type == "workflow_finished":
-                raw_data = event.get("data") or {}
-                workflow_outputs = raw_data.get("outputs") or {}
-                card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
-                status_placeholder.empty()
-                if extract_mode != "empty":
-                    field_count = len(card_data)
-                    st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
-                else:
-                    st.warning("⚠️ 未提取到输出内容")
-                    with st.expander("🔍 调试：workflow_finished 原始事件"):
-                        st.json(event)
-            elif event_type == "ping":
-                pass
+        # ========== [临时] 跳过 Dify 调用，使用固定数据节省 tokens ==========
+        # TODO: 恢复 Dify 调用时取消下面的注释
+        # for event in client.run_workflow_streaming(inputs=inputs):
+        #     event_type = event.get("event", "")
+        #     if event_type == "error":
+        #         status_placeholder.empty()
+        #         st.error(f"❌ 生成失败: {event.get('message', '未知错误')}")
+        #         if "status_code" in event:
+        #             st.write(f"**状态码**: {event['status_code']}")
+        #         break
+        #     elif event_type == "workflow_started":
+        #         workflow_id = event.get("workflow_run_id", "")
+        #         status_placeholder.info(f"🚀 工作流已启动 (ID: {workflow_id[:8]}...)")
+        #     elif event_type == "node_started":
+        #         node_title = event.get("data", {}).get("title", "")
+        #         status_placeholder.info(f"⏳ 执行中: {node_title}...")
+        #     elif event_type == "node_finished":
+        #         node_title = event.get("data", {}).get("title", "")
+        #         status_placeholder.success(f"✅ 完成: {node_title}")
+        #     elif event_type == "workflow_finished":
+        #         raw_data = event.get("data") or {}
+        #         workflow_outputs = raw_data.get("outputs") or {}
+        #         card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
+        #         status_placeholder.empty()
+        #         if extract_mode != "empty":
+        #             field_count = len(card_data)
+        #             st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
+        #         else:
+        #             st.warning("⚠️ 未提取到输出内容")
+        #             with st.expander("🔍 调试：workflow_finished 原始事件"):
+        #                 st.json(event)
+        #     elif event_type == "ping":
+        #         pass
 
-        # ===== [保留] 使用固定卡片数据（跳过 Dify API 调用）—— 后续测试用 =====
-        # card_data = {
-        #     "title": "偶然表象下的必然积累",
-        #     "quote": "真的猛士，敢于直面惨淡的人生，敢于正视淋漓的鲜血。——《记念刘和珍君》",
-        #     "source_quote": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。——罗曼·罗兰",
-        #     "summary": "成功并非纯粹的运气博弈，而是持续行动与因果律的精确兑现。",
-        #     "book": "《纳瓦尔宝典》",
-        #     "movie": "《肖申克的救赎》",
-        #     "keywords": "运气、长期主义、因果律、持续行动",
-        # }
-        # extract_mode = "fixed"
-        # status_placeholder.empty()
-        # st.success("✅ 卡片数据已就绪（固定数据模式）")
+        # ===== 使用固定卡片数据（跳过 Dify API 调用） =====
+        card_data = {
+            "title": "偶然表象下的必然积累",
+            "quote": "真的猛士，敢于直面惨淡的人生，敢于正视淋漓的鲜血。——《记念刘和珍君》",
+            "source_quote": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。——罗曼·罗兰",
+            "summary": "成功并非纯粹的运气博弈，而是持续行动与因果律的精确兑现。",
+            "book": "《纳瓦尔宝典》",
+            "movie": "《肖申克的救赎》",
+            "keywords": "运气、长期主义、因果律、持续行动",
+        }
+        extract_mode = "fixed"
+        status_placeholder.empty()
+        st.success("✅ 卡片数据已就绪（固定数据模式）")
 
         # ===== 循环结束，展示最终结果 =====
 
@@ -467,6 +470,19 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
             try:
                 with st.spinner("🎨 正在渲染卡片图片..."):
                     card_image = generate_card_image(card_data)
+
+                # ===== 保存图片到本地 =====
+                # 生成安全的文件名（去掉特殊字符）
+                title_for_filename = re.sub(r'[\\/:*?"<>|]', '', card_data.get("title", "知识卡片"))
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                image_filename = f"{title_for_filename}_{timestamp}.png"
+                image_path = GENERATED_DIR / image_filename
+                card_image.save(image_path, format="PNG")
+
+                # ===== 保存卡片到数据库 =====
+                db = get_db()
+                card_id = db.save_card(card_data, str(image_path))
+                st.success(f"✅ 卡片已保存到卡片书（ID: {card_id}）")
 
                 # ===== 展示图片 =====
                 st.image(
@@ -515,7 +531,85 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
         if workflow_id:
             st.caption(f"工作流 ID: `{workflow_id}`")
 
-# ========================== 第八段：页脚提示 ==========================
+# ========================== 第八段：卡片书页面 ==========================
+
+st.divider()
+st.subheader("📚 我的卡片书")
+
+# ---------- 搜索功能 ----------
+search_col1, search_col2 = st.columns([3, 1])
+with search_col1:
+    search_keyword = st.text_input("🔍 搜索卡片", placeholder="输入关键词搜索...")
+with search_col2:
+    st.write("")
+    st.write("")
+    delete_btn_placeholder = st.empty()
+
+# ---------- 获取卡片列表 ----------
+db = get_db()
+
+# ---------- 处理删除操作（放在卡片列表渲染之前） ----------
+if "delete_card_id" in st.session_state:
+    db.delete_card(st.session_state["delete_card_id"])
+    del st.session_state["delete_card_id"]
+    st.rerun()
+
+total_count = db.get_card_count()
+
+if search_keyword:
+    cards = db.search_cards(search_keyword)
+else:
+    cards = db.get_all_cards()
+
+# ---------- 显示卡片数量 ----------
+if search_keyword:
+    st.caption(f"搜索 '{search_keyword}'，找到 {len(cards)} 张卡片")
+else:
+    st.caption(f"共 {total_count} 张卡片")
+
+# ---------- 卡片网格展示 ----------
+if cards:
+    # 每行显示 3 张卡片
+    cols = st.columns(3)
+    for idx, card in enumerate(cards):
+        with cols[idx % 3]:
+            # 显示卡片图片（如果有）
+            if card.get("card_image_path") and os.path.exists(card["card_image_path"]):
+                st.image(
+                    card["card_image_path"],
+                    caption=card.get("title", "知识卡片"),
+                    width="stretch",
+                )
+            else:
+                # 如果没有图片，显示文字卡片
+                st.write(f"**{card.get('title', '无标题')}**")
+                st.write(f"📝 {card.get('quote', '')[:30]}...")
+            
+            # 显示基本信息
+            with st.expander(f"详情 (ID: {card['id']})"):
+                st.write(f"**标题**: {card.get('title', '')}")
+                st.write(f"**金句**: {card.get('quote', '')}")
+                if card.get('source_quote'):
+                    st.write(f"**引用**: {card['source_quote']}")
+                if card.get('summary'):
+                    st.write(f"**解读**: {card['summary']}")
+                if card.get('keywords'):
+                    st.write(f"**关键词**: {card['keywords']}")
+                if card.get('book'):
+                    st.write(f"**书籍**: {card['book']}")
+                if card.get('movie'):
+                    st.write(f"**电影**: {card['movie']}")
+                st.write(f"**创建时间**: {card.get('created_at', '')}")
+                
+                # 删除按钮
+                if st.button(f"🗑️ 删除", key=f"delete_{card['id']}", use_container_width=True):
+                    st.session_state["delete_card_id"] = card["id"]
+                    st.rerun()
+else:
+    st.info("还没有卡片，快去生成一张吧！✨")
+
+
+# ========================== 第九段：页脚提示 ==========================
 
 st.divider()
 st.caption("💡 提示：工作流执行可能需要 30-60 秒，请耐心等待")
