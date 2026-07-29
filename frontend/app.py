@@ -536,16 +536,7 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
 st.divider()
 st.subheader("📚 我的卡片书")
 
-# ---------- 搜索功能 ----------
-search_col1, search_col2 = st.columns([3, 1])
-with search_col1:
-    search_keyword = st.text_input("🔍 搜索卡片", placeholder="输入关键词搜索...")
-with search_col2:
-    st.write("")
-    st.write("")
-    delete_btn_placeholder = st.empty()
-
-# ---------- 获取卡片列表 ----------
+# ---------- 获取数据库实例 ----------
 db = get_db()
 
 # ---------- 处理删除操作（放在卡片列表渲染之前） ----------
@@ -554,59 +545,241 @@ if "delete_card_id" in st.session_state:
     del st.session_state["delete_card_id"]
     st.rerun()
 
-total_count = db.get_card_count()
+# ---------- 搜索和筛选控制 ----------
+search_col1, search_col2, search_col3 = st.columns([3, 1, 1])
+with search_col1:
+    search_keyword = st.text_input("🔍 搜索卡片", placeholder="输入关键词搜索...", key="card_search")
+with search_col2:
+    view_mode = st.selectbox("📋 查看方式", ["📂 按主题分组", "🔲 平铺展示"])
+with search_col3:
+    batch_mode = st.checkbox("🗑️ 批量管理", key="batch_mode")
+    # 👆 勾选后进入批量管理模式，可以批量选择和删除卡片
 
-if search_keyword:
-    cards = db.search_cards(search_keyword)
-else:
-    cards = db.get_all_cards()
+# ---------- 初始化批量选择的卡片 ID 列表 ----------
+if "selected_card_ids" not in st.session_state:
+    st.session_state["selected_card_ids"] = []
 
-# ---------- 显示卡片数量 ----------
-if search_keyword:
-    st.caption(f"搜索 '{search_keyword}'，找到 {len(cards)} 张卡片")
-else:
-    st.caption(f"共 {total_count} 张卡片")
+# ---------- 获取标签统计（用于标签筛选） ----------
+all_tags = db.get_all_tags()
+# 👆 获取所有标签及其使用次数
 
-# ---------- 卡片网格展示 ----------
-if cards:
-    # 每行显示 3 张卡片
-    cols = st.columns(3)
-    for idx, card in enumerate(cards):
-        with cols[idx % 3]:
-            # 显示卡片图片（如果有）
-            if card.get("card_image_path") and os.path.exists(card["card_image_path"]):
-                st.image(
-                    card["card_image_path"],
-                    caption=card.get("title", "知识卡片"),
-                    width="stretch",
-                )
-            else:
-                # 如果没有图片，显示文字卡片
-                st.write(f"**{card.get('title', '无标题')}**")
-                st.write(f"📝 {card.get('quote', '')[:30]}...")
-            
-            # 显示基本信息
-            with st.expander(f"详情 (ID: {card['id']})"):
-                st.write(f"**标题**: {card.get('title', '')}")
-                st.write(f"**金句**: {card.get('quote', '')}")
-                if card.get('source_quote'):
-                    st.write(f"**引用**: {card['source_quote']}")
-                if card.get('summary'):
-                    st.write(f"**解读**: {card['summary']}")
-                if card.get('keywords'):
-                    st.write(f"**关键词**: {card['keywords']}")
-                if card.get('book'):
-                    st.write(f"**书籍**: {card['book']}")
-                if card.get('movie'):
-                    st.write(f"**电影**: {card['movie']}")
-                st.write(f"**创建时间**: {card.get('created_at', '')}")
-                
-                # 删除按钮
-                if st.button(f"🗑️ 删除", key=f"delete_{card['id']}", use_container_width=True):
-                    st.session_state["delete_card_id"] = card["id"]
+# ---------- 初始化选中标签列表 ----------
+selected_tags = []
+# 👆 先初始化为空列表，后面根据 checkbox 选择更新
+
+# ---------- 标签筛选区 ----------
+if all_tags:
+    st.markdown("### 🏷️ 标签筛选")
+    
+    # 显示热门标签（最多显示 15 个）
+    tag_cols = st.columns(5)
+    
+    for idx, tag_info in enumerate(all_tags[:15]):
+        tag = tag_info["tag"]
+        count = tag_info["count"]
+        col = tag_cols[idx % 5]
+        
+        # 用 checkbox 实现标签筛选
+        if col.checkbox(f"{tag} ({count})", key=f"tag_{tag}"):
+            selected_tags.append(tag)
+    
+    if selected_tags:
+        st.caption(f"已选标签: {', '.join(selected_tags)}")
+
+# ---------- 获取筛选后的卡片 ----------
+if view_mode == "📂 按主题分组":
+    # 获取按风格分组的卡片
+    grouped_cards = db.get_cards_grouped_by_style(
+        keyword=search_keyword if search_keyword else "",
+        tags=selected_tags
+    )
+    
+    # 显示筛选结果
+    total_filtered = sum(len(cards) for cards in grouped_cards.values())
+    st.caption(f"找到 {total_filtered} 张卡片，分布在 {len(grouped_cards)} 个主题中")
+    
+    if grouped_cards:
+        # 风格图标映射
+        style_icons = {
+            "healing": "🏥",
+            "philosophy": "🧘",
+            "inspiration": "💪",
+            "eastern": "☯️",
+            "minimal": "⚪",
+            "elegant": "✨",
+        }
+        
+        # 批量操作栏
+        if batch_mode:
+            batch_col1, batch_col2, batch_col3 = st.columns([2, 1, 1])
+            with batch_col1:
+                st.info(f"已选择 {len(st.session_state['selected_card_ids'])} 张卡片")
+            with batch_col2:
+                if st.button("✅ 全选", use_container_width=True):
+                    # 获取所有卡片 ID
+                    all_ids = []
+                    for cards in grouped_cards.values():
+                        all_ids.extend([c['id'] for c in cards])
+                    st.session_state["selected_card_ids"] = all_ids
                     st.rerun()
-else:
-    st.info("还没有卡片，快去生成一张吧！✨")
+            with batch_col3:
+                if st.button("❌ 清空", use_container_width=True):
+                    st.session_state["selected_card_ids"] = []
+                    st.rerun()
+            
+            # 批量删除按钮
+            if st.button(f"🗑️ 批量删除 {len(st.session_state['selected_card_ids'])} 张", 
+                        disabled=len(st.session_state['selected_card_ids']) == 0,
+                        type="primary",
+                        use_container_width=True):
+                if st.session_state['selected_card_ids']:
+                    deleted = db.batch_delete_cards(st.session_state['selected_card_ids'])
+                    st.success(f"已删除 {deleted} 张卡片")
+                    st.session_state["selected_card_ids"] = []
+                    st.rerun()
+        
+        # 按主题分组展示
+        for style, cards in grouped_cards.items():
+            icon = style_icons.get(style, "📁")
+            with st.expander(f"{icon} {style} ({len(cards)}张)"):
+                # 每行显示 3 张卡片
+                cols = st.columns(3)
+                for idx, card in enumerate(cards):
+                    with cols[idx % 3]:
+                        # 批量选择复选框
+                        if batch_mode:
+                            is_selected = card['id'] in st.session_state['selected_card_ids']
+                            if st.checkbox(f"选择 ID:{card['id']}", value=is_selected, 
+                                        key=f"select_{card['id']}"):
+                                if card['id'] not in st.session_state['selected_card_ids']:
+                                    st.session_state['selected_card_ids'].append(card['id'])
+                            else:
+                                if card['id'] in st.session_state['selected_card_ids']:
+                                    st.session_state['selected_card_ids'].remove(card['id'])
+                        
+                        # 显示卡片图片（如果有）
+                        if card.get("card_image_path") and os.path.exists(card["card_image_path"]):
+                            st.image(
+                                card["card_image_path"],
+                                caption=card.get("title", "知识卡片"),
+                                width="stretch",
+                            )
+                        else:
+                            # 如果没有图片，显示文字卡片
+                            st.write(f"**{card.get('title', '无标题')}**")
+                            st.write(f"📝 {card.get('quote', '')[:30]}...")
+                        
+                        # 显示详情
+                        with st.expander(f"详情 (ID: {card['id']})"):
+                            st.write(f"**标题**: {card.get('title', '')}")
+                            st.write(f"**金句**: {card.get('quote', '')}")
+                            if card.get('source_quote'):
+                                st.write(f"**引用**: {card['source_quote']}")
+                            if card.get('summary'):
+                                st.write(f"**解读**: {card['summary']}")
+                            if card.get('keywords'):
+                                st.write(f"**关键词**: {card['keywords']}")
+                            if card.get('book'):
+                                st.write(f"**书籍**: {card['book']}")
+                            if card.get('movie'):
+                                st.write(f"**电影**: {card['movie']}")
+                            st.write(f"**创建时间**: {card.get('created_at', '')}")
+                            
+                            # 删除按钮（非批量模式下显示）
+                            if not batch_mode:
+                                if st.button(f"🗑️ 删除", key=f"delete_{card['id']}", use_container_width=True):
+                                    st.session_state["delete_card_id"] = card["id"]
+                                    st.rerun()
+    else:
+        st.info("还没有符合条件的卡片，快去生成一张吧！✨")
+
+else:  # 平铺展示模式
+    # 获取筛选后的卡片
+    cards = db.filter_cards(
+        keyword=search_keyword if search_keyword else "",
+        tags=selected_tags
+    )
+    
+    # 显示筛选结果
+    st.caption(f"找到 {len(cards)} 张卡片")
+    
+    if cards:
+        # 批量操作栏
+        if batch_mode:
+            batch_col1, batch_col2, batch_col3 = st.columns([2, 1, 1])
+            with batch_col1:
+                st.info(f"已选择 {len(st.session_state['selected_card_ids'])} 张卡片")
+            with batch_col2:
+                if st.button("✅ 全选", key="select_all_flat", use_container_width=True):
+                    st.session_state["selected_card_ids"] = [c['id'] for c in cards]
+                    st.rerun()
+            with batch_col3:
+                if st.button("❌ 清空", key="clear_all_flat", use_container_width=True):
+                    st.session_state["selected_card_ids"] = []
+                    st.rerun()
+            
+            # 批量删除按钮
+            if st.button(f"🗑️ 批量删除 {len(st.session_state['selected_card_ids'])} 张", 
+                        key="batch_delete_flat",
+                        disabled=len(st.session_state['selected_card_ids']) == 0,
+                        type="primary",
+                        use_container_width=True):
+                if st.session_state['selected_card_ids']:
+                    deleted = db.batch_delete_cards(st.session_state['selected_card_ids'])
+                    st.success(f"已删除 {deleted} 张卡片")
+                    st.session_state["selected_card_ids"] = []
+                    st.rerun()
+        
+        # 每行显示 3 张卡片
+        cols = st.columns(3)
+        for idx, card in enumerate(cards):
+            with cols[idx % 3]:
+                # 批量选择复选框
+                if batch_mode:
+                    is_selected = card['id'] in st.session_state['selected_card_ids']
+                    if st.checkbox(f"选择 ID:{card['id']}", value=is_selected, 
+                                key=f"select_flat_{card['id']}"):
+                        if card['id'] not in st.session_state['selected_card_ids']:
+                            st.session_state['selected_card_ids'].append(card['id'])
+                    else:
+                        if card['id'] in st.session_state['selected_card_ids']:
+                            st.session_state['selected_card_ids'].remove(card['id'])
+                
+                # 显示卡片图片（如果有）
+                if card.get("card_image_path") and os.path.exists(card["card_image_path"]):
+                    st.image(
+                        card["card_image_path"],
+                        caption=card.get("title", "知识卡片"),
+                        width="stretch",
+                    )
+                else:
+                    # 如果没有图片，显示文字卡片
+                    st.write(f"**{card.get('title', '无标题')}**")
+                    st.write(f"📝 {card.get('quote', '')[:30]}...")
+                
+                # 显示详情
+                with st.expander(f"详情 (ID: {card['id']})"):
+                    st.write(f"**标题**: {card.get('title', '')}")
+                    st.write(f"**金句**: {card.get('quote', '')}")
+                    if card.get('source_quote'):
+                        st.write(f"**引用**: {card['source_quote']}")
+                    if card.get('summary'):
+                        st.write(f"**解读**: {card['summary']}")
+                    if card.get('keywords'):
+                        st.write(f"**关键词**: {card['keywords']}")
+                    if card.get('book'):
+                        st.write(f"**书籍**: {card['book']}")
+                    if card.get('movie'):
+                        st.write(f"**电影**: {card['movie']}")
+                    st.write(f"**创建时间**: {card.get('created_at', '')}")
+                    
+                    # 删除按钮（非批量模式下显示）
+                    if not batch_mode:
+                        if st.button(f"🗑️ 删除", key=f"delete_{card['id']}", use_container_width=True):
+                            st.session_state["delete_card_id"] = card["id"]
+                            st.rerun()
+    else:
+        st.info("还没有符合条件的卡片，快去生成一张吧！✨")
 
 
 # ========================== 第九段：页脚提示 ==========================
