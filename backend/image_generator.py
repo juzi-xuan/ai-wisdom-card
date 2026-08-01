@@ -383,8 +383,13 @@ class CardImageGenerator:
 
         logger.info(f"CardImageGenerator v3 初始化, 画布={self.width}x{self.height}")
 
-    def generate(self, card_data: Dict[str, Any]) -> Image.Image:
-        """生成卡片图片（主入口）"""
+    def generate(self, card_data: Dict[str, Any], custom_bg: Optional[Image.Image] = None) -> Image.Image:
+        """生成卡片图片（主入口）
+
+        参数：
+            custom_bg: 用户自定义背景图（可选）。如果提供，优先使用；
+                       如果为 None，则随机选背景。
+        """
         title = card_data.get("title", "知识卡片")
         quote = card_data.get("quote", "")
         source_quote = card_data.get("source_quote", "")
@@ -398,7 +403,7 @@ class CardImageGenerator:
         logger.info(f"开始生成卡片: title='{title[:20]}...'")
 
         # ========== 加载背景图 ==========
-        img = self._load_background()
+        img = self._load_background(custom_bg)
         draw = ImageDraw.Draw(img)
 
         # ========== 计算6个区域 ==========
@@ -446,24 +451,40 @@ class CardImageGenerator:
 
         return img
 
-    def _load_background(self) -> Image.Image:
-        """加载背景图片并叠加半透明遮罩"""
-        bg_path = None
+    def _load_background(self, custom_bg: Optional[Image.Image] = None) -> Image.Image:
+        """加载背景图片并叠加半透明遮罩
 
-        if BACKGROUNDS_DIR.exists():
-            bg_files = [
-                f for f in BACKGROUNDS_DIR.iterdir()
-                if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
-            ]
-            if bg_files:
-                bg_path = random.choice(bg_files)
-                logger.info(f"选中背景图: {bg_path.name}")
+        参数：
+            custom_bg: 用户自定义的背景图片（PIL Image）。如果提供，优先使用；
+                       如果为 None，则从背景库随机选一张。
+        """
+        bg = None  # 👈 最终要用来画画的背景图（RGB 模式）
 
-        if bg_path is None:
-            logger.warning("未找到背景图，使用纯色背景")
-            return Image.new("RGBA", (self.width, self.height), COLOR_DEEP_PURPLE)
+        # ===== 第一步：如果用户上传了自定义背景，优先使用 =====
+        if custom_bg is not None:
+            # 把上传的图片转成 RGB 模式（去掉透明通道，方便后续处理）
+            bg = custom_bg.convert("RGB")
+            logger.info("使用用户上传的自定义背景图")
+        else:
+            # ===== 第二步：没有自定义背景，就从背景库随机选一张 =====
+            bg_path = None
 
-        bg = Image.open(bg_path).convert("RGB")
+            if BACKGROUNDS_DIR.exists():
+                bg_files = [
+                    f for f in BACKGROUNDS_DIR.iterdir()
+                    if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+                ]
+                if bg_files:
+                    bg_path = random.choice(bg_files)
+                    logger.info(f"选中背景图: {bg_path.name}")
+
+            if bg_path is None:
+                logger.warning("未找到背景图，使用纯色背景")
+                return Image.new("RGBA", (self.width, self.height), COLOR_DEEP_PURPLE)
+
+            bg = Image.open(bg_path).convert("RGB")
+
+        # ===== 第三步：把背景图缩放裁剪到画布尺寸（cover 模式） =====
         scale_w = self.width / bg.width
         scale_h = self.height / bg.height
         scale = max(scale_w, scale_h)
@@ -757,10 +778,15 @@ class CardImageGenerator:
 
 # ========================== 便捷函数 ==========================
 
-def generate_card_image(card_data: Dict[str, Any]) -> Image.Image:
-    """快捷函数：一行代码生成卡片图片"""
+def generate_card_image(card_data: Dict[str, Any], custom_bg: Optional[Image.Image] = None) -> Image.Image:
+    """快捷函数：一行代码生成卡片图片
+
+    参数：
+        custom_bg: 用户自定义背景图（可选）。如果提供，优先使用；
+                   如果为 None，则随机选背景。
+    """
     generator = CardImageGenerator()
-    return generator.generate(card_data)
+    return generator.generate(card_data, custom_bg=custom_bg)
 
 
 def generate_card_bytes(card_data: Dict[str, Any], format: str = "PNG") -> bytes:

@@ -50,8 +50,9 @@ load_dotenv(dotenv_path=env_path)  # 👆 把 .env 里的配置读到环境变�
 # ---------- 导入我们自己写的 Dify 客户端和图片生成器 ----------
 # 现在 Python 已经知道去 backend/ 找了（前面加了 sys.path）
 from dify_api import DifyClient  # 👆 我们自己写的"AI 对话客户端"
-from image_generator import generate_card_image  # 👆 "卡片印刷机"：把 JSON 变成图片
+from image_generator import generate_card_image, BACKGROUNDS_DIR  # 👆 卡片印刷机 + 背景库目录
 from database import get_db, GENERATED_DIR  # 👆 数据库操作和图片保存目录
+from PIL import Image  # 👆 图片处理库：把上传的文件变成 PIL 图片对象
 
 
 # ========================== 第二段：辅助工具函数 ==========================
@@ -316,6 +317,24 @@ source = st.text_input(
     placeholder="书名 / 文章名 / 视频名",
 )
 
+# ---------- 输入区：自定义背景图（可选） ----------
+st.subheader("🖼️ 自定义背景图（可选）")
+uploaded_bg = st.file_uploader(
+    "上传一张你喜欢的图片作为卡片背景",
+    type=["jpg", "jpeg", "png", "webp"],
+    help="不上传则随机使用背景库中的图片；上传后优先使用你选的图",
+)
+# 如果上传了图片，显示一个勾选项：是否保存到背景库
+save_to_library = False  # 👈 默认不保存
+if uploaded_bg is not None:
+    save_to_library = st.checkbox(
+        "💾 保存到背景库（以后生成的卡片也可能随机用到这张图）",
+        value=False,
+        help="勾选后，这张图会复制保存到 assets/backgrounds/ 文件夹",
+    )
+    # 预览上传的图片，让用户确认是自己想要的
+    st.image(uploaded_bg, caption="你上传的背景图预览", width=300)
+
 # ---------- 按钮区：一行放两个按钮 ----------
 col1, col2 = st.columns([1, 1])
 # 👆 st.columns 把一行分成若干列，[1,1] 表示等宽两列
@@ -468,8 +487,25 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
 
             # ===== 生成图片 =====
             try:
+                # ===== 处理自定义背景图 =====
+                custom_bg = None  # 👈 默认 None → 走随机背景逻辑
+                if uploaded_bg is not None:
+                    # 把上传的文件读成 PIL 图片对象
+                    custom_bg = Image.open(uploaded_bg)
+                    # 如果用户勾选了"保存到背景库"，就把图片存到 backgrounds 文件夹
+                    if save_to_library:
+                        # 生成不重复的文件名：user_ + 时间戳 + 原后缀
+                        bg_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        bg_suffix = Path(uploaded_bg.name).suffix.lower() or ".jpg"
+                        bg_filename = f"user_{bg_timestamp}{bg_suffix}"
+                        bg_save_path = BACKGROUNDS_DIR / bg_filename
+                        # 保存到背景库（转成 RGB 避免透明通道导致 jpg 保存报错）
+                        custom_bg.convert("RGB").save(bg_save_path)
+                        st.info(f"💾 背景图已保存到背景库: {bg_filename}")
+
                 with st.spinner("🎨 正在渲染卡片图片..."):
-                    card_image = generate_card_image(card_data)
+                    # 生成卡片图片（传入 custom_bg；为 None 时自动走随机背景）
+                    card_image = generate_card_image(card_data, custom_bg=custom_bg)
 
                 # ===== 保存图片到本地 =====
                 # 生成安全的文件名（去掉特殊字符）
@@ -611,7 +647,7 @@ if view_mode == "📂 按主题分组":
         
         # 批量操作栏
         if batch_mode:
-            batch_col1, batch_col2, batch_col3 = st.columns([2, 1, 1])
+            batch_col1, batch_col2 = st.columns([2, 1])
             with batch_col1:
                 st.info(f"已选择 {len(st.session_state['selected_card_ids'])} 张卡片")
             with batch_col2:
@@ -621,10 +657,6 @@ if view_mode == "📂 按主题分组":
                     for cards in grouped_cards.values():
                         all_ids.extend([c['id'] for c in cards])
                     st.session_state["selected_card_ids"] = all_ids
-                    st.rerun()
-            with batch_col3:
-                if st.button("❌ 清空", use_container_width=True):
-                    st.session_state["selected_card_ids"] = []
                     st.rerun()
             
             # 批量删除按钮
@@ -706,16 +738,12 @@ else:  # 平铺展示模式
     if cards:
         # 批量操作栏
         if batch_mode:
-            batch_col1, batch_col2, batch_col3 = st.columns([2, 1, 1])
+            batch_col1, batch_col2 = st.columns([2, 1])
             with batch_col1:
                 st.info(f"已选择 {len(st.session_state['selected_card_ids'])} 张卡片")
             with batch_col2:
                 if st.button("✅ 全选", key="select_all_flat", use_container_width=True):
                     st.session_state["selected_card_ids"] = [c['id'] for c in cards]
-                    st.rerun()
-            with batch_col3:
-                if st.button("❌ 清空", key="clear_all_flat", use_container_width=True):
-                    st.session_state["selected_card_ids"] = []
                     st.rerun()
             
             # 批量删除按钮
