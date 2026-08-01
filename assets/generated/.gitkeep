@@ -1,0 +1,4 @@
+# 这个空文件是用来"占座位"的——Git 本来不跟踪空目录，
+# 放一个 .gitkeep 就能让 assets/generated/ 目录结构被提交上去，
+# 不然别人 clone 仓库后第一次运行 app.py 会因为这个目录不存在而报错。
+# .gitignore 里已经专门豁免了 .gitkeep（写了 !.gitkeep），所以它能正常上传。
