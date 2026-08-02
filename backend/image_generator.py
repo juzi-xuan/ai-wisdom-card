@@ -77,28 +77,32 @@ TAG_ICON_MAP = {
 
 def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     """
-    加载中文字体（通用版，用于普通正文）
+    加载中文字体（通用版，用于正文、副标题等）
 
     加载优先级：
-    1. 项目字体目录的 ZCOOL 小薇（优雅衬线）
-    2. 系统楷体（calligraphic）
-    3. 系统宋体（serif）
-    4. 系统微软雅黑（sans-serif）
+    1. 系统微软雅黑（首选，清晰现代）
+    2. 系统 DengXian
+    3. 项目字体目录的 ZCOOL 小薇（衬线风格回退）
+    4. 系统楷体/宋体
     5. 默认字体（最后兜底）
     """
     candidates = []
 
-    # 优先使用项目自带的优雅衬线体
-    if FONTS_DIR.exists():
-        candidates.append((str(FONTS_DIR / "ZCOOLXiaoWei-Regular.ttf"), 0))
-
-    # 系统字体回退链
+    # 优先使用系统微软雅黑
     candidates.extend([
-        ("C:/Windows/Fonts/simkai.ttf", 0),           # 楷体
-        ("C:/Windows/Fonts/simsun.ttc", 1 if bold else 0),  # 宋体
         ("C:/Windows/Fonts/msyh.ttc", 2 if bold else 0),    # 微软雅黑
         ("C:/Windows/Fonts/msyhbd.ttc", 0),                  # 微软雅黑粗体
         ("C:/Windows/Fonts/Deng.ttf", 0),                    # DengXian
+    ])
+
+    # 项目字体回退
+    if FONTS_DIR.exists():
+        candidates.append((str(FONTS_DIR / "ZCOOLXiaoWei-Regular.ttf"), 0))
+
+    # 更多系统字体回退
+    candidates.extend([
+        ("C:/Windows/Fonts/simkai.ttf", 0),           # 楷体
+        ("C:/Windows/Fonts/simsun.ttc", 1 if bold else 0),  # 宋体
     ])
 
     for font_path, font_index in candidates:
@@ -188,6 +192,98 @@ def _load_light_font(size: int) -> ImageFont.FreeTypeFont:
             continue
 
     logger.warning(f"未找到可用的细体字体, size={size}")
+    return ImageFont.load_default()
+
+
+def _load_lxgw_wenkai_font(size: int) -> ImageFont.FreeTypeFont:
+    """
+    加载 LXGW WenKai Bold 霞鹜文楷粗体（用于大标题）
+
+    加载优先级：
+    1. 项目字体目录的 LXGW WenKai Bold（多种文件名兼容）
+    2. 系统楷体（最接近的手写风格系统字体）
+    3. 刘建毛草（项目内手写体回退）
+    """
+    candidates = []
+
+    if FONTS_DIR.exists():
+        candidates.extend([
+            (str(FONTS_DIR / "LXGWWenKai-Bold.ttf"), 0),
+            (str(FONTS_DIR / "LXGWWenKai-Bold.otf"), 0),
+            (str(FONTS_DIR / "LXGW WenKai Bold.ttf"), 0),
+            (str(FONTS_DIR / "LXGW WenKai Bold.otf"), 0),
+            (str(FONTS_DIR / "lxgw-wenkai-bold.ttf"), 0),
+            (str(FONTS_DIR / "lxgw-wenkai-bold.otf"), 0),
+        ])
+        # 回退：项目内其他手写体
+        candidates.append((str(FONTS_DIR / "LiuJianMaoCao-Regular.ttf"), 0))
+
+    # 系统字体回退
+    candidates.extend([
+        ("C:/Windows/Fonts/simkai.ttf", 0),       # 楷体
+        ("C:/Windows/Fonts/simfang.ttf", 0),      # 仿宋
+        ("C:/Windows/Fonts/simsun.ttc", 0),       # 宋体
+    ])
+
+    for font_path, font_index in candidates:
+        try:
+            logger.debug(f"加载霞鹜文楷: {font_path}, size={size}")
+            font = ImageFont.truetype(font_path, size, index=font_index)
+            test_bbox = font.getbbox("测试")
+            if test_bbox[3] - test_bbox[1] <= 1:
+                logger.warning(f"字体 {font_path} bbox 异常 {test_bbox}，跳过")
+                continue
+            return font
+        except (OSError, IOError):
+            continue
+
+    logger.warning(f"未找到可用的霞鹜文楷字体, size={size}")
+    return ImageFont.load_default()
+
+
+def _load_sourcehan_serif_font(size: int) -> ImageFont.FreeTypeFont:
+    """
+    加载 SourceHanSerif 思源宋体（用于金句）
+
+    加载优先级：
+    1. 项目字体目录的 SourceHanSerif（多种文件名兼容）
+    2. 系统宋体
+    3. ZCOOL 小薇（衬线风格回退）
+    """
+    candidates = []
+
+    if FONTS_DIR.exists():
+        candidates.extend([
+            (str(FONTS_DIR / "SourceHanSerifSC-Regular.otf"), 0),
+            (str(FONTS_DIR / "SourceHanSerifCN-Regular.otf"), 0),
+            (str(FONTS_DIR / "SourceHanSerif-Regular.otf"), 0),
+            (str(FONTS_DIR / "SourceHanSerifSC-Regular.ttf"), 0),
+            (str(FONTS_DIR / "SourceHanSerifCN-Regular.ttf"), 0),
+            (str(FONTS_DIR / "SourceHanSerif-Regular.ttf"), 0),
+            (str(FONTS_DIR / "SourceHanSerif.otf"), 0),
+            (str(FONTS_DIR / "SourceHanSerif.ttf"), 0),
+        ])
+        candidates.append((str(FONTS_DIR / "ZCOOLXiaoWei-Regular.ttf"), 0))
+
+    # 系统字体回退
+    candidates.extend([
+        ("C:/Windows/Fonts/simsun.ttc", 0),       # 宋体
+        ("C:/Windows/Fonts/simkai.ttf", 0),       # 楷体
+    ])
+
+    for font_path, font_index in candidates:
+        try:
+            logger.debug(f"加载思源宋体: {font_path}, size={size}")
+            font = ImageFont.truetype(font_path, size, index=font_index)
+            test_bbox = font.getbbox("测试")
+            if test_bbox[3] - test_bbox[1] <= 1:
+                logger.warning(f"字体 {font_path} bbox 异常 {test_bbox}，跳过")
+                continue
+            return font
+        except (OSError, IOError):
+            continue
+
+    logger.warning(f"未找到可用的思源宋体字体, size={size}")
     return ImageFont.load_default()
 
 
@@ -481,23 +577,23 @@ class CardImageGenerator:
         self._padding_h: int = max(10, int(PADDING_H * self._scale))
         self._padding_v: int = max(10, int(PADDING_V * self._scale))
 
-        # ---------- 字体（v4 治愈系：手写体标题 + 优雅衬线正文） ----------
-        # 标题用手写体，营造温暖自然的感觉
-        self.font_title_handwriting = _load_handwriting_font(max(8, int(84 * self._scale)))
+        # ---------- 字体（v5：霞鹜文楷标题 + 思源宋体金句 + 雅黑正文） ----------
+        # 标题用 LXGW WenKai Bold 霞鹜文楷粗体
+        self.font_title_handwriting = _load_lxgw_wenkai_font(max(8, int(80 * self._scale)))
 
-        # 引用金句也用手写体，略小一号
-        self.font_quote_handwriting = _load_handwriting_font(max(8, int(42 * self._scale)))
+        # 引用金句用 SourceHanSerif 思源宋体
+        self.font_quote_handwriting = _load_sourcehan_serif_font(max(8, int(42 * self._scale)))
 
-        # 副标题/英文装饰用衬线体
+        # 副标题/英文装饰用微软雅黑
         self.font_subtitle = _load_font(max(8, int(28 * self._scale)))
 
-        # 正文用优雅衬线体
-        self.font_body = _load_font(max(8, int(24 * self._scale)))
+        # 正文用微软雅黑，28px
+        self.font_body = _load_font(max(8, int(28 * self._scale)))
 
         # 信息面板标题
         self.font_panel_title = _load_font(max(8, int(22 * self._scale)), bold=True)
 
-        # 辅助信息用细体
+        # 辅助信息用微软雅黑 Light
         self.font_caption = _load_light_font(max(8, int(18 * self._scale)))
 
         # 旧字体兼容（保留用于过渡期，后续版本移除）
@@ -512,75 +608,45 @@ class CardImageGenerator:
         self.font_rec_title = self.font_panel_title
         self.font_rec_name = self.font_subtitle
 
-        logger.info(f"CardImageGenerator v4 初始化, 画布={self.width}x{self.height}, 字体: LiuJianMaoCao(手写)/ZCOOLXiaoWei(衬线)")
+        logger.info(f"CardImageGenerator v5 初始化, 画布={self.width}x{self.height}, 字体: LXGW WenKai Bold(标题)/SourceHanSerif(金句)/Microsoft YaHei(正文)")
 
     def generate(self, card_data: Dict[str, Any], custom_bg: Optional[Image.Image] = None) -> Image.Image:
-        """生成卡片图片（主入口）
-
-        参数：
-            custom_bg: 用户自定义背景图（可选）。如果提供，优先使用；
-                       如果为 None，则随机选背景。
-        """
+        """生成阅读书签风格知识卡片"""
         title = card_data.get("title", "知识卡片")
         quote = card_data.get("quote", "")
         source_quote = card_data.get("source_quote", "")
         summary = card_data.get("summary", "")
-        keywords_str = card_data.get("keywords", "")
         book = card_data.get("book", "")
         movie = card_data.get("movie", "")
 
-        keywords = [kw.strip() for kw in keywords_str.replace("，", ",").split(",") if kw.strip()]
+        logger.info(f"开始生成卡片: title='{title[:20]}...'" )
 
-        logger.info(f"开始生成卡片: title='{title[:20]}...'")
-
-        # ========== 加载背景图 ==========
         img = self._load_background(custom_bg)
         draw = ImageDraw.Draw(img)
 
-        # ========== 计算6个区域 ==========
-        usable_height = self.height - self._padding_v * 2
-        zone_heights = [int(usable_height * r) for r in ZONE_RATIOS]
+        # 新版布局：标题 / 金句 / 思考 / 延伸阅读
+        zones = {
+            "title": {"y_start": 120, "height": 220},
+            "quote": {"y_start": 390, "height": 300},
+            "summary": {"y_start": 760, "height": 260},
+            "recommend": {"y_start": 1120, "height": 220},
+        }
 
-        zones = {}
-        y = self._padding_v
-        zone_names = ["title", "quote1", "quote2", "summary", "keywords", "recommend"]
-        for name, h in zip(zone_names, zone_heights):
-            zones[name] = {"y_start": y, "y_end": y + h, "height": h}
-            y += h
-
-        # ========== 绘制各区域 ==========
-
-        # --- 区域1：标题 ---
         self._draw_title(draw, title, zones["title"])
 
-        # --- 区域2：金句卡片1 ---
         if quote:
-            self._draw_quote_card(
-                draw, quote, zones["quote1"],
-                bg_alpha=120,  # 半透明磨砂，提高透明度增强文字对比度
-                icon_text="✦",
-            )
+            self._draw_quote_card(draw, quote, zones["quote"], bg_alpha=80, icon_text="")
 
-        # --- 区域3：金句卡片2 ---
-        if source_quote:
-            self._draw_quote_card(
-                draw, source_quote, zones["quote2"],
-                bg_alpha=160,  # 更深，提高透明度增强文字对比度
-                icon_text="✧",
-            )
+        if source_quote and not quote:
+            self._draw_quote_card(draw, source_quote, zones["quote"], bg_alpha=80, icon_text="")
 
-        # --- 区域4：AI解读 ---
         if summary:
             self._draw_summary(draw, summary, zones["summary"])
 
-        # --- 区域5：关键词胶囊标签 ---
-        if keywords:
-            self._draw_keywords(draw, keywords, zones["keywords"])
-
-        # --- 区域6：AI推荐 ---
         self._draw_recommend(draw, book, movie, zones["recommend"])
 
         return img
+
 
     def _load_background(self, custom_bg: Optional[Image.Image] = None) -> Image.Image:
         """加载背景图片并叠加半透明遮罩
@@ -637,178 +703,48 @@ class CardImageGenerator:
     # ==================== 区域绘制 ====================
 
     def _draw_title(self, draw: ImageDraw.Draw, title: str, zone: dict):
-        """标题：左对齐，带字间距，两行不同字号，带描边增强清晰度"""
+        """阅读笔记标题：左对齐，大留白"""
+        x = int(120 * self._scale)
+        y = zone["y_start"]
+
+        draw.text((x, y), "READING NOTE", fill=COLOR_ACCENT, font=self.font_subtitle)
+        y += int(70*self._scale)
+
         lines = _split_title_lines(title)
-
-        x_start = int(180 * self._scale)
-        y = zone["y_start"] + int(40 * self._scale)
-
-        for i, line in enumerate(lines):
-            font = self.font_title_line1 if i == 0 else self.font_title_line2
-            y = _draw_text_spaced(
-                draw, line, x_start, y, font, COLOR_GOLD,
-                spacing=int(20 * self._scale),
-                stroke_color="#1a1a2e",  # 深紫色描边
-                stroke_width=int(2 * self._scale)  # 描边宽度，让文字更清晰
-            )
+        for line in lines:
+            draw.text((x, y), line, fill=COLOR_WHITE, font=self.font_title_handwriting)
+            y += int(95*self._scale)
 
     def _draw_quote_card(
         self, draw: ImageDraw.Draw, quote: str, zone: dict,
-        bg_alpha: int = 60, icon_text: str = "✦"
+        bg_alpha: int = 80, icon_text: str = ""
     ):
-        """绘制金句卡片（半透明圆角矩形+左侧图标+左对齐文字）"""
-        card_w = int(800 * self._scale)
-        card_h = int(230 * self._scale)
-        card_x = int(140 * self._scale)
-        card_y = zone["y_start"] + int((zone["height"] - card_h) // 2)
-        border_radius = int(32 * self._scale)
+        """简洁引用区域：像书页上的摘录"""
+        x = int(130*self._scale)
+        y = zone["y_start"]
+        max_w = int(820*self._scale)
 
-        # ---------- 绘制半透明卡片背景（磨砂玻璃效果） ----------
-        card_overlay = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
-        card_draw = ImageDraw.Draw(card_overlay)
-        card_draw.rounded_rectangle(
-            [0, 0, card_w, card_h],
-            radius=border_radius,
-            fill=(41, 39, 71, bg_alpha)
-        )
-        card_draw.rounded_rectangle(
-            [0, 0, card_w, card_h],
-            radius=border_radius,
-            outline=(232, 199, 122, 150),
-            width=max(1, int(1 * self._scale))
-        )
-        # 创建全尺寸overlay并粘贴卡片
-        full_overlay = Image.new("RGBA", draw._image.size, (0, 0, 0, 0))
-        full_overlay.paste(card_overlay, (card_x, card_y))
-        base_rgba = draw._image.convert("RGBA")
-        composite = Image.alpha_composite(base_rgba, full_overlay)
-        draw._image.paste(composite, (0, 0))
+        # 顶部装饰线
+        draw.line((x, y, x+120, y), fill=COLOR_ACCENT, width=3)
+        y += 35
 
-        # ---------- 左侧图标（优先加载图标文件，回退到圆球+文字） ----------
-        # 📐 计算图标大小和位置
-        icon_size = int(60 * self._scale)
-        # 👆 图标大小是 60x60 像素（乘以缩放比例），就像一个小徽章
-        icon_bg_x = card_x + int(50 * self._scale)
-        # 👆 图标左边距离卡片左边 50 像素（留出一点空隙）
-        icon_bg_y = card_y + (card_h - icon_size) // 2
-        # 👆 图标垂直居中：卡片高度减去图标高度，除以 2，就是上边距
-
-        # 🎲 尝试从图标文件夹里随机拿一个图标
-        icon_img = _load_random_icon(icon_size)
-        # 👆 调用玩具箱管理员，让它随机拿一个玩具（图标）
-
-        if icon_img is not None:
-            # ✅ 拿到了图标！直接把图标贴到卡片上
-
-            # 把卡片图片转换成支持透明的模式（RGBA）
-            base_rgba = draw._image.convert("RGBA")
-            # 👆 RGBA = 红、绿、蓝、透明度，就像给图片加了一层"透明魔法"
-
-            # 创建一个全透明的画布，用来放图标
-            full_icon = Image.new("RGBA", draw._image.size, (0, 0, 0, 0))
-            # 👆 (0, 0, 0, 0) = 黑色但完全透明（看不见）
-
-            # 把图标贴到画布的指定位置
-            full_icon.paste(icon_img, (icon_bg_x, icon_bg_y), icon_img)
-            # 👆 第三个参数 icon_img 是"蒙版"，用来保留图标的透明部分
-            #    就像贴贴纸时，只贴有图案的地方，透明的地方不会盖住下面
-
-            # 把图标画布和卡片图片合并
-            composite = Image.alpha_composite(base_rgba, full_icon)
-            # 👆 alpha_composite = 透明合并，让两个图片重叠时透明部分正常显示
-
-            # 把合并后的图片放回原来的卡片上
-            draw._image.paste(composite, (0, 0))
-
-        else:
-            # ❌ 没找到图标！那就用老办法：画一个圆球，上面写个字
-
-            # 创建一个透明的小圆画布，用来画圆球
-            icon_overlay = Image.new("RGBA", (icon_size, icon_size), (0, 0, 0, 0))
-            icon_draw = ImageDraw.Draw(icon_overlay)
-
-            # 在小圆画布上画一个金色的圆形（圆球背景）
-            icon_draw.ellipse([0, 0, icon_size, icon_size], fill=(232, 199, 122, 100))
-            # 👆 ellipse = 椭圆，这里画的是正圆（因为宽高一样）
-            #    fill=(232, 199, 122, 100) = 金色，透明度 100（半透明）
-
-            # 把小圆画布放到卡片的全大图上
-            full_icon = Image.new("RGBA", draw._image.size, (0, 0, 0, 0))
-            full_icon.paste(icon_overlay, (icon_bg_x, icon_bg_y))
-
-            # 合并到卡片上
-            base_rgba = draw._image.convert("RGBA")
-            composite = Image.alpha_composite(base_rgba, full_icon)
-            draw._image.paste(composite, (0, 0))
-
-            # 在圆球中间写一个装饰符号（比如 ✦ 或 ✧）
-            icon_font = _load_font(max(8, int(28 * self._scale)))
-            # 👆 加载字体，大小是 28 像素
-            draw.text(
-                (icon_bg_x + icon_size // 2, icon_bg_y + icon_size // 2),
-                # 👆 坐标：图标左上角 + 图标大小的一半 = 正中间
-                icon_text, fill=COLOR_GOLD, font=icon_font, anchor="mm"
-                # 👆 anchor="mm" = 文字中心点对齐坐标点（就像把字放在靶心）
-            )
-
-        # ---------- 正文（左对齐） ----------
-        text_x = card_x + int(130 * self._scale)
-        text_max_w = card_w - int(160 * self._scale)
-
-        # 分离破折号出处
-        dash = "\u2014\u2014"
-        main_quote = quote
-        author = None
-        if dash in quote:
-            parts = quote.split(dash, 1)
-            main_quote = parts[0].rstrip()
-            author = "\u2014\u2014" + parts[1].lstrip()
-
-        # 绘制引文（带描边增强清晰度）
-        y_text = card_y + int(30 * self._scale)
-        lines = _wrap_text(main_quote, self.font_quote, text_max_w)
-        line_spacing = int(self.font_quote.size * 1.5)
-        stroke_width = int(1 * self._scale)  # 描边宽度
-
+        lines = _wrap_text(quote, self.font_quote_handwriting, max_w)
         for line in lines:
-            # 先画描边，让文字更清晰
-            draw.text((text_x, y_text), line, fill="#1a1a2e", font=self.font_quote, stroke_width=stroke_width)
-            # 再画文字主体
-            draw.text((text_x, y_text), line, fill=COLOR_CREAM, font=self.font_quote)
-            y_text += line_spacing
-
-        # ---------- 作者（右下角，带描边） ----------
-        if author:
-            author_font = self.font_quote_author
-            author_w = int(author_font.getlength(author))
-            author_x = card_x + card_w - int(50 * self._scale) - author_w
-            author_y = card_y + card_h - int(40 * self._scale)
-            # 先画描边
-            draw.text((author_x, author_y), author, fill="#1a1a2e", font=author_font, stroke_width=stroke_width)
-            # 再画文字主体
-            draw.text((author_x, author_y), author, fill=COLOR_GOLD, font=author_font)
+            draw.text((x,y), line, fill=COLOR_WHITE, font=self.font_quote_handwriting)
+            y += int(65*self._scale)
 
     def _draw_summary(self, draw: ImageDraw.Draw, summary: str, zone: dict):
-        """AI解读区域，带描边增强清晰度"""
-        y = zone["y_start"] + int(10 * self._scale)
-        stroke_width = int(1 * self._scale)
+        """思考区域"""
+        x=int(130*self._scale)
+        y=zone["y_start"]
 
-        # 标题（带描边）
-        y = _draw_centered_text(
-            draw, "— AI解读 —", y,
-            self.font_summary_title, COLOR_GOLD,
-            self.width, spacing=int(15 * self._scale),
-            stroke_width=stroke_width
-        )
-        y += int(20 * self._scale)
+        draw.text((x,y), "一点思考", fill=COLOR_ACCENT, font=self.font_panel_title)
+        y += 55
 
-        # 正文（带描边）
-        _draw_multiline_centered(
-            draw, summary, y,
-            self.font_summary, COLOR_CREAM,
-            self.width, max_width=int(800 * self._scale),
-            stroke_width=stroke_width
-        )
+        lines=_wrap_text(summary, self.font_body, int(800*self._scale))
+        for line in lines:
+            draw.text((x,y), line, fill=COLOR_WHITE, font=self.font_body)
+            y += int(42*self._scale)
 
     def _draw_keywords(self, draw: ImageDraw.Draw, keywords: List[str], zone: dict):
         """关键词胶囊标签"""
@@ -874,37 +810,19 @@ class CardImageGenerator:
             x += tag_w + tag_gap
 
     def _draw_recommend(self, draw: ImageDraw.Draw, book: str, movie: str, zone: dict):
-        """AI推荐区域，带描边增强清晰度"""
-        y = zone["y_start"] + int(10 * self._scale)
-        stroke_width = int(1 * self._scale)
+        """延伸阅读区域"""
+        x=int(130*self._scale)
+        y=zone["y_start"]
 
-        # 标题（带描边）
-        y = _draw_centered_text(
-            draw, "— AI推荐 —", y,
-            self.font_rec_title, COLOR_GOLD,
-            self.width, spacing=int(15 * self._scale),
-            stroke_width=stroke_width
-        )
-        y += int(30 * self._scale)
+        draw.text((x,y), "延伸阅读", fill=COLOR_ACCENT, font=self.font_panel_title)
+        y += 60
 
-        # 书名（带描边）
         if book:
-            _draw_multiline_centered(
-                draw, book, y,
-                self.font_rec_name, COLOR_CREAM,
-                self.width,
-                stroke_width=stroke_width
-            )
-            y += int(self.font_rec_name.size * 1.8)
+            draw.text((x,y), f"📖 {book}", fill=COLOR_WHITE, font=self.font_rec_name)
+            y += 55
 
-        # 电影名（带描边）
         if movie:
-            _draw_multiline_centered(
-                draw, movie, y,
-                self.font_rec_name, COLOR_CREAM,
-                self.width,
-                stroke_width=stroke_width
-            )
+            draw.text((x,y), f"🎬 {movie}", fill=COLOR_WHITE, font=self.font_rec_name)
 
 
 # ========================== 便捷函数 ==========================
@@ -929,27 +847,4 @@ def generate_card_bytes(card_data: Dict[str, Any], format: str = "PNG") -> bytes
     return buf.getvalue()
 
 
-# ========================== 自测代码 ==========================
 
-def main():
-    """直接运行时的测试代码"""
-    test_card_data = {
-        "title": "\u5076\u7136\u8868\u8c61\u4e0b\u7684\u5fc5\u7136\u79ef\u7d2f",
-        "quote": "\u201c\u771f\u7684\u731b\u58eb\uff0c\u6562\u4e8e\u76f4\u9762\u60e8\u6de1\u7684\u4eba\u751f\uff0c\u6562\u4e8e\u6b63\u89c6\u6dcc\u6dcf\u7684\u9c9c\u8840\u3002\u201d\u2014\u2014\u300a\u8bb0\u5ff5\u5218\u548c\u73cd\u541b\u300b",
-        "source_quote": "\u4e16\u754c\u4e0a\u53ea\u6709\u4e00\u79cd\u771f\u6b63\u7684\u82f1\u96c4\u4e3b\u4e49\uff0c\u90a3\u5c31\u662f\u5728\u8ba4\u6e05\u751f\u6d3b\u7684\u771f\u76f8\u540e\u4f9d\u7136\u70ed\u7231\u751f\u6d3b\u3002\u2014\u2014\u7f57\u66fc\u00b7\u7f57\u5170",
-        "summary": "\u6210\u529f\u5e76\u975e\u7eaf\u7cb9\u7684\u8fd0\u6c14\u535a\u5f08\uff0c\u800c\u662f\u6301\u7eed\u884c\u52a8\u4e0e\u56e0\u679c\u5f8b\u7684\u7cbe\u786e\u5151\u73b0\u3002",
-        "keywords": "\u8fd0\u6c14\u3001\u957f\u671f\u4e3b\u4e49\u3001\u56e0\u679c\u5f8b\u3001\u6301\u7eed\u884c\u52a8",
-        "book": "\u300a\u7eb3\u74e6\u5c14\u5b9d\u5178\u300b",
-        "movie": "\u300a\u8096\u7533\u514b\u7684\u6551\u8d4e\u300b",
-    }
-
-    print("正在生成测试卡片...")
-    img = generate_card_image(test_card_data)
-    output_path = "test_card_v3.png"
-    img.save(output_path)
-    print(f"卡片已保存到: {output_path}")
-    print(f"图片尺寸: {img.size}")
-
-
-if __name__ == "__main__":
-    main()
