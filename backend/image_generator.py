@@ -19,30 +19,44 @@ from loguru import logger
 CARD_WIDTH = 1080
 CARD_HEIGHT = 1440
 
-# ---------- 配色体系（三主色） ----------
-COLOR_GOLD = "#FFD700"        # 主色1：亮金色（标题、分割线、图标），比原来更亮
-COLOR_CREAM = "#FFFFFF"       # 主色2：纯白色（正文），比原来更亮
-COLOR_DEEP_PURPLE = "#292747" # 主色3：深紫（卡片背景）
+# ---------- 配色体系（治愈系温暖风格 v4） ----------
+# 核心理念：留白、温暖、自然，像一张精美的书签
 
-# 背景渐变色
-COLOR_GRADIENT_TOP = "#25284A"     # 顶部：深蓝紫
-COLOR_GRADIENT_MID = "#62526D"     # 中部：灰紫
-COLOR_GRADIENT_BOTTOM = "#8D6570"  # 底部：暗粉紫
+# 文字颜色（墨色系，适合阅读）
+COLOR_TEXT_PRIMARY = "#2C2C2C"       # 深墨色：正文、引用文字
+COLOR_TEXT_SECONDARY = "#6B6B6B"     # 柔灰色：辅助信息、小字
+COLOR_TEXT_MUTED = "#9E9E9E"         # 浅灰色：最弱的文字
+COLOR_TEXT_ON_IMAGE = "#FFFFFF"      # 纯白色：背景图上的文字（标题）
 
-COLOR_TEXT_DIM = "#B0B0C8"
-COLOR_WHITE = "#FFFFFF"
+# 装饰色（柔金色，书签的感觉）
+COLOR_ACCENT = "#C9A962"             # 柔金色：分割线、装饰元素、点缀
+
+# 半透明面板颜色（温暖奶白）
+COLOR_PANEL_BG = (255, 255, 255, 220)     # 白色 85% 透明度：信息面板
+COLOR_QUOTE_BG = (255, 253, 248, 235)    # 暖白色 92% 透明度：引用区
+COLOR_BOTTOM_BG = (245, 242, 238, 225)   # 米灰色 88% 透明度：底部信息区
+
+# 文字颜色（保留旧变量名兼容，暂时保持旧值避免破坏深色卡片上的文字）
+# 这些常量会在 Phase 3 重绘卡片时切换为新配色
+COLOR_GOLD = COLOR_ACCENT           # 柔金色：用于标题、装饰线
+COLOR_CREAM = "#FFFFFF"             # 白色：用于深色半透明卡片上的文字（不能改！）
+COLOR_DEEP_PURPLE = "#292747"       # 深紫：用于卡片背景遮罩（保持旧值）
+COLOR_WHITE = "#FFFFFF"             # 纯白：通用白色
+
+# 背景遮罩（新版大幅降低透明度，保留背景图美感）
+OVERLAY_ALPHA = 40  # 从 160 降到 40，几乎不遮挡背景
 
 # ---------- 排版参数 ----------
 PADDING_H = 80
 PADDING_V = 60
-LINE_SPACING_RATIO = 1.6
+LINE_SPACING_RATIO = 1.8  # 从 1.6 提升到 1.8，行距更宽松
 
 # ---------- 背景图片 ----------
 BACKGROUNDS_DIR = Path(__file__).parent.parent / "assets" / "backgrounds"
 ICONS_DIR = Path(__file__).parent.parent / "assets" / "icons"
-OVERLAY_ALPHA = 160
+FONTS_DIR = Path(__file__).parent.parent / "assets" / "fonts"
 
-# ---------- 布局区域高度比例 ----------
+# ---------- 布局区域高度比例（暂时保持旧布局，Phase 2 再重构） ----------
 ZONE_RATIOS = [0.20, 0.17, 0.18, 0.15, 0.10, 0.15]
 
 # ---------- 关键词图标映射 ----------
@@ -58,16 +72,34 @@ TAG_ICON_MAP = {
 
 
 # ========================== 字体加载 ==========================
+# 新版字体体系：手写体（标题）+ 优雅衬线（正文）+ 系统字体（回退）
+# 字体文件存放在 assets/fonts/ 目录下
 
 def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """加载中文字体，优先宋体（衬线体）"""
-    candidates = [
-        ("C:/Windows/Fonts/simsun.ttc", 1 if bold else 0),
-        ("C:/Windows/Fonts/msyhbd.ttc", 0),
-        ("C:/Windows/Fonts/msyh.ttc", 2 if bold else 0),
-        ("C:/Windows/Fonts/Dengb.ttf", 0),
-        ("C:/Windows/Fonts/simhei.ttf", 0),
-    ]
+    """
+    加载中文字体（通用版，用于普通正文）
+
+    加载优先级：
+    1. 项目字体目录的 ZCOOL 小薇（优雅衬线）
+    2. 系统楷体（calligraphic）
+    3. 系统宋体（serif）
+    4. 系统微软雅黑（sans-serif）
+    5. 默认字体（最后兜底）
+    """
+    candidates = []
+
+    # 优先使用项目自带的优雅衬线体
+    if FONTS_DIR.exists():
+        candidates.append((str(FONTS_DIR / "ZCOOLXiaoWei-Regular.ttf"), 0))
+
+    # 系统字体回退链
+    candidates.extend([
+        ("C:/Windows/Fonts/simkai.ttf", 0),           # 楷体
+        ("C:/Windows/Fonts/simsun.ttc", 1 if bold else 0),  # 宋体
+        ("C:/Windows/Fonts/msyh.ttc", 2 if bold else 0),    # 微软雅黑
+        ("C:/Windows/Fonts/msyhbd.ttc", 0),                  # 微软雅黑粗体
+        ("C:/Windows/Fonts/Deng.ttf", 0),                    # DengXian
+    ])
 
     for font_path, font_index in candidates:
         try:
@@ -75,7 +107,87 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         except (OSError, IOError):
             continue
 
-    logger.warning(f"未找到可用的中文字体, size={size}")
+    logger.warning(f"未找到可用的中文字体（通用）, size={size}")
+    return ImageFont.load_default()
+
+
+def _load_handwriting_font(size: int) -> ImageFont.FreeTypeFont:
+    """
+    加载手写体字体（用于大标题，营造温暖手写感）
+
+    加载优先级：
+    1. 刘建毛草手写体（渲染正常的手写体）
+    2. 马善政手写体（⚠️ 注意：此字体 bbox 异常，可能渲染不出来）
+    3. 系统楷体（最接近手写的系统字体）
+    4. 系统仿宋（次优选择）
+
+    ⚠️ 2026-08-02 发现：马善政字体 bbox 返回 (0, descent, width, descent)，
+    导致字形在 PIL 中不可见。暂时放在第二优先级，待后续验证修复后再启用。
+    """
+    candidates = []
+
+    # 优先使用渲染正常的手写体
+    if FONTS_DIR.exists():
+        candidates.extend([
+            (str(FONTS_DIR / "LiuJianMaoCao-Regular.ttf"), 0),  # 刘建毛草 ✅ 渲染正常
+            (str(FONTS_DIR / "MaShanZheng-Regular.ttf"), 0),    # 马善政 ⚠️ 可能渲染不出来
+        ])
+
+    # 系统字体回退
+    candidates.extend([
+        ("C:/Windows/Fonts/simkai.ttf", 0),       # 楷体
+        ("C:/Windows/Fonts/simfang.ttf", 0),      # 仿宋
+        ("C:/Windows/Fonts/simsun.ttc", 0),       # 宋体
+    ])
+
+    for font_path, font_index in candidates:
+        try:
+            logger.debug(f"加载手写体: {font_path}, size={size}")
+            font = ImageFont.truetype(font_path, size, index=font_index)
+            # 验证字体是否能正常渲染（检查 bbox 是否合理）
+            test_bbox = font.getbbox("测试")
+            if test_bbox[3] - test_bbox[1] <= 1:
+                # bbox 高度为 0 或极小，字体有问题，跳过
+                logger.warning(f"字体 {font_path} bbox 异常 {test_bbox}，跳过")
+                continue
+            return font
+        except (OSError, IOError):
+            continue
+
+    logger.warning(f"未找到可用的手写体字体, size={size}")
+    return ImageFont.load_default()
+
+
+def _load_light_font(size: int) -> ImageFont.FreeTypeFont:
+    """
+    加载细体字体（用于辅助信息、小字，轻盈不压迫）
+
+    加载优先级：
+    1. 系统微软雅黑 Light（最细的系统中文字体）
+    2. ZCOOL 小薇（如果没有 Light 雅黑）
+    3. DengXian
+    4. 普通雅黑
+    """
+    candidates = [
+        ("C:/Windows/Fonts/msyhl.ttc", 0),        # 微软雅黑 Light
+    ]
+
+    if FONTS_DIR.exists():
+        candidates.append((str(FONTS_DIR / "ZCOOLXiaoWei-Regular.ttf"), 0))
+
+    candidates.extend([
+        ("C:/Windows/Fonts/Dengl.ttf", 0),         # DengXian Light
+        ("C:/Windows/Fonts/msyh.ttc", 0),          # 微软雅黑
+        ("C:/Windows/Fonts/simsun.ttc", 0),        # 宋体
+    ])
+
+    for font_path, font_index in candidates:
+        try:
+            return ImageFont.truetype(font_path, size, index=font_index)
+        except (OSError, IOError):
+            continue
+
+    logger.warning(f"未找到可用的细体字体, size={size}")
     return ImageFont.load_default()
 
 
@@ -369,19 +481,38 @@ class CardImageGenerator:
         self._padding_h: int = max(10, int(PADDING_H * self._scale))
         self._padding_v: int = max(10, int(PADDING_V * self._scale))
 
-        # ---------- 字体 ----------
-        self.font_title_line1 = _load_font(max(8, int(72 * self._scale)), bold=True)
-        self.font_title_line2 = _load_font(max(8, int(90 * self._scale)), bold=True)
-        self.font_quote = _load_font(max(8, int(38 * self._scale)))
-        self.font_quote_author = _load_font(max(8, int(22 * self._scale)))
-        self.font_summary_title = _load_font(max(8, int(24 * self._scale)))
-        self.font_summary = _load_font(max(8, int(28 * self._scale)))
-        self.font_tag = _load_font(max(8, int(26 * self._scale)))
-        self.font_tag_icon = _load_font(max(8, int(22 * self._scale)))
-        self.font_rec_title = _load_font(max(8, int(24 * self._scale)))
-        self.font_rec_name = _load_font(max(8, int(36 * self._scale)), bold=True)
+        # ---------- 字体（v4 治愈系：手写体标题 + 优雅衬线正文） ----------
+        # 标题用手写体，营造温暖自然的感觉
+        self.font_title_handwriting = _load_handwriting_font(max(8, int(84 * self._scale)))
 
-        logger.info(f"CardImageGenerator v3 初始化, 画布={self.width}x{self.height}")
+        # 引用金句也用手写体，略小一号
+        self.font_quote_handwriting = _load_handwriting_font(max(8, int(42 * self._scale)))
+
+        # 副标题/英文装饰用衬线体
+        self.font_subtitle = _load_font(max(8, int(28 * self._scale)))
+
+        # 正文用优雅衬线体
+        self.font_body = _load_font(max(8, int(24 * self._scale)))
+
+        # 信息面板标题
+        self.font_panel_title = _load_font(max(8, int(22 * self._scale)), bold=True)
+
+        # 辅助信息用细体
+        self.font_caption = _load_light_font(max(8, int(18 * self._scale)))
+
+        # 旧字体兼容（保留用于过渡期，后续版本移除）
+        self.font_title_line1 = self.font_title_handwriting
+        self.font_title_line2 = self.font_title_handwriting
+        self.font_quote = self.font_quote_handwriting
+        self.font_quote_author = self.font_caption
+        self.font_summary_title = self.font_panel_title
+        self.font_summary = self.font_body
+        self.font_tag = self.font_body
+        self.font_tag_icon = self.font_subtitle
+        self.font_rec_title = self.font_panel_title
+        self.font_rec_name = self.font_subtitle
+
+        logger.info(f"CardImageGenerator v4 初始化, 画布={self.width}x{self.height}, 字体: LiuJianMaoCao(手写)/ZCOOLXiaoWei(衬线)")
 
     def generate(self, card_data: Dict[str, Any], custom_bg: Optional[Image.Image] = None) -> Image.Image:
         """生成卡片图片（主入口）
