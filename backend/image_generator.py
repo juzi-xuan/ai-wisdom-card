@@ -353,6 +353,120 @@ def _load_random_icon(icon_size: int) -> Optional[Image.Image]:
         return None
 
 
+# ========================== 背景感知文字 ==========================
+
+def _add_gradient_overlay(img: Image.Image) -> Image.Image:
+    """
+    给背景图添加顶部→底部的暗化渐变遮罩
+
+    效果：
+        顶部：0% 透明 → 底部：50% 黑色
+        这样文字区域永远有足够对比度，类似电影字幕的黑边处理
+    """
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+
+    h = img.height
+    for y in range(h):
+        # 从上到下，渐变增加黑色透明度
+        ratio = y / h
+        alpha = int(140 * ratio)  # 底部最多 140/255 ≈ 55% 黑色
+        overlay_draw.line([(0, y), (img.width, y)], fill=(0, 0, 0, alpha))
+
+    return Image.alpha_composite(img.convert("RGBA"), overlay)
+
+
+def _auto_text_color(img: Image.Image) -> Dict[str, str]:
+    """
+    全局检测背景亮度，返回统一的文字配色方案
+
+    类似 iPhone 锁屏 / 小红书封面 的设计逻辑：
+        一张图只检测一次，全卡统一用同一套配色
+
+    返回：
+        {
+            "main":       主文字颜色,
+            "secondary":  次要文字颜色,
+            "accent":     装饰/标题颜色,
+            "stroke":     描边/阴影颜色,
+        }
+    """
+    try:
+        # 缩小采样，加速计算
+        sample = img.convert("RGB").resize((50, 50))
+        pixels = list(sample.getdata())
+
+        if not pixels:
+            return {
+                "main": "#FFFFFF", "secondary": "#EEEEEE",
+                "accent": "#E8C77A", "stroke": "#222222",
+            }
+
+        brightness = sum(
+            0.299 * r + 0.587 * g + 0.114 * b
+            for r, g, b in pixels
+        ) / len(pixels)
+
+        if brightness > 170:
+            # 背景很亮 → 深色文字
+            return {
+                "main": "#222222",
+                "secondary": "#555555",
+                "accent": "#B08A3E",
+                "stroke": "#FFFFFF",
+                "shadow": "#FFFFFF",
+            }
+        else:
+            # 背景较暗 → 白色文字
+            return {
+                "main": "#FFFFFF",
+                "secondary": "#EEEEEE",
+                "accent": "#E8C77A",
+                "stroke": "#222222",
+                "shadow": "#000000",
+            }
+    except Exception:
+        return {
+            "main": "#FFFFFF", "secondary": "#EEEEEE",
+            "accent": "#E8C77A", "stroke": "#222222",
+            "shadow": "#000000",
+        }
+
+
+def _draw_text_with_shadow(
+    draw: ImageDraw.Draw,
+    text: str,
+    x: int,
+    y: int,
+    font: ImageFont.FreeTypeFont,
+    color: str,
+    shadow_color: str = "#000000",
+    shadow_offset: int = 2,
+    stroke_color: Optional[str] = None,
+    stroke_width: int = 0,
+):
+    """
+    绘制带阴影/描边的文字，增强背景上的可读性
+    x, y 为文字左上角坐标
+    """
+    # 1. 阴影
+    if shadow_offset > 0:
+        draw.text(
+            (x + shadow_offset, y + shadow_offset),
+            text, fill=shadow_color, font=font
+        )
+
+    # 2. 描边
+    if stroke_width > 0 and stroke_color:
+        draw.text(
+            (x, y), text, fill=stroke_color, font=font,
+            stroke_width=stroke_width
+        )
+
+    # 3. 文字主体
+    draw.text((x, y), text, fill=color, font=font)
+
+
 # ========================== 文字工具 ==========================
 
 def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[str]:
@@ -579,7 +693,7 @@ class CardImageGenerator:
 
         # ---------- 字体（v5：霞鹜文楷标题 + 思源宋体金句 + 雅黑正文） ----------
         # 标题用 LXGW WenKai Bold 霞鹜文楷粗体
-        self.font_title_handwriting = _load_lxgw_wenkai_font(max(8, int(80 * self._scale)))
+        self.font_title_handwriting = _load_lxgw_wenkai_font(max(8, int(72 * self._scale)))
 
         # 引用金句用 SourceHanSerif 思源宋体
         self.font_quote_handwriting = _load_sourcehan_serif_font(max(8, int(42 * self._scale)))
@@ -622,7 +736,15 @@ class CardImageGenerator:
         logger.info(f"开始生成卡片: title='{title[:20]}...'" )
 
         img = self._load_background(custom_bg)
+
+        # 1. 添加顶部暗化渐变遮罩，确保文字可读
+        img = _add_gradient_overlay(img)
+
+        # 2. 全局检测背景亮度，确定统一的文字配色方案
+        self.text_theme = _auto_text_color(img)
+
         draw = ImageDraw.Draw(img)
+        self._img = img
 
         # 新版布局：标题 / 金句 / 思考 / 延伸阅读
         zones = {
@@ -703,48 +825,91 @@ class CardImageGenerator:
     # ==================== 区域绘制 ====================
 
     def _draw_title(self, draw: ImageDraw.Draw, title: str, zone: dict):
-        """阅读笔记标题：左对齐，大留白"""
+        """阅读笔记标题：使用全局文字主题"""
         x = int(120 * self._scale)
         y = zone["y_start"]
+        theme = self.text_theme
 
-        draw.text((x, y), "READING NOTE", fill=COLOR_ACCENT, font=self.font_subtitle)
-        y += int(70*self._scale)
+        # 装饰小标题（READING NOTE）用主题 accent 色
+        draw.text((x, y), "READING NOTE", fill=theme["accent"], font=self.font_subtitle)
+        y += int(70 * self._scale)
 
+        # 标题正文：纯白色，无阴影无描边
         lines = _split_title_lines(title)
         for line in lines:
-            draw.text((x, y), line, fill=COLOR_WHITE, font=self.font_title_handwriting)
-            y += int(95*self._scale)
+            draw.text((x, y), line, fill="#FFFFFF", font=self.font_title_handwriting)
+            y += int(95 * self._scale)
 
     def _draw_quote_card(
         self, draw: ImageDraw.Draw, quote: str, zone: dict,
         bg_alpha: int = 80, icon_text: str = ""
     ):
-        """简洁引用区域：像书页上的摘录"""
-        x = int(130*self._scale)
+        """简洁引用区域：使用全局文字主题"""
+        x = int(130 * self._scale)
         y = zone["y_start"]
-        max_w = int(820*self._scale)
+        max_w = int(820 * self._scale)
+        theme = self.text_theme
 
         # 顶部装饰线
-        draw.line((x, y, x+120, y), fill=COLOR_ACCENT, width=3)
+        draw.line((x, y, x + 120, y), fill=theme["accent"], width=3)
         y += 35
 
+        # 金句文字：带阴影 + 描边
         lines = _wrap_text(quote, self.font_quote_handwriting, max_w)
         for line in lines:
-            draw.text((x,y), line, fill=COLOR_WHITE, font=self.font_quote_handwriting)
-            y += int(65*self._scale)
+            _draw_text_with_shadow(
+                draw, line, x, y, self.font_quote_handwriting,
+                color=theme["main"],
+                shadow_color=theme["shadow"],
+                shadow_offset=int(2 * self._scale),
+                stroke_color=theme["stroke"],
+                stroke_width=int(1 * self._scale),
+            )
+            y += int(65 * self._scale)
 
     def _draw_summary(self, draw: ImageDraw.Draw, summary: str, zone: dict):
-        """思考区域"""
-        x=int(130*self._scale)
-        y=zone["y_start"]
+        """思考区域：半透明白雾 + 全局文字主题"""
+        x = int(130 * self._scale)
+        y = zone["y_start"]
+        h = zone["height"]
+        right = self.width - int(80 * self._scale)
+        theme = self.text_theme
 
-        draw.text((x,y), "一点思考", fill=COLOR_ACCENT, font=self.font_panel_title)
+        # 1. 半透明白雾底
+        mist_overlay = Image.new("RGBA", self._img.size, (0, 0, 0, 0))
+        mist_draw = ImageDraw.Draw(mist_overlay)
+        margin = int(20 * self._scale)
+        mist_draw.rounded_rectangle(
+            [x - margin, y - margin, right, y + h],
+            radius=int(24 * self._scale),
+            fill=(255, 255, 255, 50)
+        )
+        self._img.paste(Image.alpha_composite(self._img.convert("RGBA"), mist_overlay), (0, 0))
+
+        # 2. 随机装饰图标
+        icon_size = int(50 * self._scale)
+        icon_img = _load_random_icon(icon_size)
+        if icon_img:
+            draw.text((x + icon_size + int(10 * self._scale), y + int(5 * self._scale)),
+                      "一点思考", fill=theme["accent"], font=self.font_panel_title)
+            self._img.paste(icon_img, (x, y), icon_img)
+        else:
+            draw.text((x, y), "一点思考", fill=theme["accent"], font=self.font_panel_title)
+
         y += 55
 
-        lines=_wrap_text(summary, self.font_body, int(800*self._scale))
+        # 3. 正文文字：带阴影
+        lines = _wrap_text(summary, self.font_body, int(800 * self._scale))
         for line in lines:
-            draw.text((x,y), line, fill=COLOR_WHITE, font=self.font_body)
-            y += int(42*self._scale)
+            _draw_text_with_shadow(
+                draw, line, x, y, self.font_body,
+                color=theme["main"],
+                shadow_color=theme["shadow"],
+                shadow_offset=int(2 * self._scale),
+                stroke_color=theme["stroke"],
+                stroke_width=0,
+            )
+            y += int(42 * self._scale)
 
     def _draw_keywords(self, draw: ImageDraw.Draw, keywords: List[str], zone: dict):
         """关键词胶囊标签"""
@@ -810,19 +975,42 @@ class CardImageGenerator:
             x += tag_w + tag_gap
 
     def _draw_recommend(self, draw: ImageDraw.Draw, book: str, movie: str, zone: dict):
-        """延伸阅读区域"""
-        x=int(130*self._scale)
-        y=zone["y_start"]
+        """延伸阅读区域：使用全局文字主题"""
+        x = int(130 * self._scale)
+        y = zone["y_start"]
+        theme = self.text_theme
 
-        draw.text((x,y), "延伸阅读", fill=COLOR_ACCENT, font=self.font_panel_title)
+        # 随机添加装饰图标
+        icon_size = int(50 * self._scale)
+        icon_img = _load_random_icon(icon_size)
+        if icon_img:
+            draw.text((x + icon_size + int(10 * self._scale), y + int(5 * self._scale)),
+                      "延伸阅读", fill=theme["accent"], font=self.font_panel_title)
+            self._img.paste(icon_img, (x, y), icon_img)
+        else:
+            draw.text((x, y), "延伸阅读", fill=theme["accent"], font=self.font_panel_title)
         y += 60
 
         if book:
-            draw.text((x,y), f"📖 {book}", fill=COLOR_WHITE, font=self.font_rec_name)
+            _draw_text_with_shadow(
+                draw, f"📖 {book}", x, y, self.font_rec_name,
+                color=theme["main"],
+                shadow_color=theme["shadow"],
+                shadow_offset=int(2 * self._scale),
+                stroke_color=theme["stroke"],
+                stroke_width=0,
+            )
             y += 55
 
         if movie:
-            draw.text((x,y), f"🎬 {movie}", fill=COLOR_WHITE, font=self.font_rec_name)
+            _draw_text_with_shadow(
+                draw, f"🎬 {movie}", x, y, self.font_rec_name,
+                color=theme["main"],
+                shadow_color=theme["shadow"],
+                shadow_offset=int(2 * self._scale),
+                stroke_color=theme["stroke"],
+                stroke_width=0,
+            )
 
 
 # ========================== 便捷函数 ==========================
