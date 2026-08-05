@@ -210,11 +210,133 @@ st.set_page_config(
 
 # ========================== 第四段：网页标题 ==========================
 
-st.title("✨ AI 知识卡片生成器")
-# 👆 页面上方的大标题（<h1> 级别）
+st.title("卡片生成器")
 
-st.caption("基于 Dify 工作流 · 测试版")
-# 👆 标题下方的小字说明（灰色，低调）
+# ========================== 第四段半：注入背景图 + 浮动动画 CSS ==========================
+import base64
+_assets_dir = Path.cwd() / "assets"
+
+# 加载背景图
+bg_css = ""
+bg_path = _assets_dir / "前端背景.png"
+if bg_path.exists():
+    with open(bg_path, "rb") as f:
+        bg_data = base64.b64encode(f.read()).decode()
+    bg_css = f"""
+    section.stMain {{
+        background-image: url("data:image/png;base64,{bg_data}") !important;
+        background-size: cover !important;
+        background-position: center center !important;
+        background-repeat: no-repeat !important;
+        background-attachment: fixed !important;
+    }}
+    [data-testid="stAppViewContainer"] > div {{
+        background: transparent !important;
+    }}
+    """
+
+st.markdown(f"""
+<style>
+@keyframes sprite-float {{
+    0%, 100% {{ transform: translateY(0); }}
+    50% {{ transform: translateY(-12px); }}
+}}
+.sprite-container {{
+    display: flex;
+    justify-content: center;
+    margin: 10px 0 20px 0;
+}}
+.sprite-img {{
+    animation: sprite-float 3s ease-in-out infinite;
+    filter: drop-shadow(0 12px 20px rgba(180, 140, 60, 0.25));
+    width: 300px;
+}}
+.stApp, section.stMain, section.stMain > div, section.stMain > div > div {{
+    background: transparent !important;
+}}
+.stTextArea > div > div > textarea,
+.stTextInput > div > div > input {{
+    background: rgba(255, 255, 255, 0.88) !important;
+    backdrop-filter: blur(8px);
+}}
+.stFileUploader {{
+    background: rgba(255, 255, 255, 0.88) !important;
+    border-radius: 10px;
+}}
+.stButton > button {{
+    background: rgba(255, 255, 255, 0.92) !important;
+    border-radius: 10px;
+    border: 1px solid rgba(180, 140, 60, 0.3);
+    transition: all 0.2s ease;
+}}
+.stButton > button:hover {{
+    background: rgba(255, 255, 255, 1) !important;
+    box-shadow: 0 4px 12px rgba(180, 140, 60, 0.2);
+    transform: translateY(-1px);
+}}
+.stSidebar {{
+    background: rgba(255, 253, 245, 0.95) !important;
+    backdrop-filter: blur(10px);
+}}
+h1, h2, h3, h4, h5, h6 {{
+    color: #5a4a2a !important;
+    text-shadow: 0 1px 3px rgba(255,255,255,0.6);
+}}
+.stMarkdown {{
+    color: #4a3a1a;
+}}
+hr {{
+    border-color: rgba(180, 140, 60, 0.25) !important;
+}}
+.stInfo {{
+    background: rgba(255, 250, 235, 0.9) !important;
+    border-left-color: rgba(180, 140, 60, 0.5) !important;
+}}
+.stExpander summary {{
+    background: rgba(255, 250, 235, 0.85) !important;
+    border-radius: 8px;
+}}
+.stCard {{
+    background: rgba(255, 255, 255, 0.85) !important;
+}}
+[data-testid="stVerticalBlock"] > div {{
+    background: transparent !important;
+}}
+.element-container {{
+    background: transparent !important;
+}}
+{bg_css}
+</style>
+""", unsafe_allow_html=True)
+
+# ========================== 第四段三分之二：小精灵浮动展示区 ==========================
+sprite_found = False
+
+if _assets_dir.exists():
+    # 优先使用处理后的透明小精灵
+    sprite_candidates = [
+        _assets_dir / "小精灵_透明.png",
+        _assets_dir / "去背景小精灵.png",
+        _assets_dir / "小精灵.png",
+    ]
+    sprite_path = next((p for p in sprite_candidates if p.exists()), None)
+    
+    if sprite_path:
+        with open(sprite_path, "rb") as img_f:
+            img_data = base64.b64encode(img_f.read()).decode()
+        img_mime = sprite_path.suffix.lower().lstrip(".")
+        if img_mime == "jpg":
+            img_mime = "jpeg"
+        
+        st.markdown(f"""
+        <div class="sprite-container">
+            <img src="data:image/{img_mime};base64,{img_data}" class="sprite-img" alt="小精灵" />
+        </div>
+        """, unsafe_allow_html=True)
+        sprite_found = True
+
+if not sprite_found:
+    st.info("🧚 小精灵图片未找到")
 
 
 # ========================== 第五段：左侧边栏（设置面板） ==========================
@@ -298,17 +420,11 @@ with st.sidebar:
 
 # ========================== 第六段：主区域（输入和生成） ==========================
 
-st.divider()  # 👆 水平分割线
-
 # ---------- 输入区：文字输入框 ----------
-st.subheader("📝 输入文本")
 input_text = st.text_area(
-    "输入你想生成卡片的文字",
-    # 👆 标签文字
-    height=120,
-    # 👆 输入框高度（像素）
-    placeholder="例如：人生最大的遗憾，不是失败，而是我本可以。",
-    # 👆 输入框为空时显示的灰色提示文字
+    "文本",
+    height=140,
+    placeholder="输入你想生成卡片的文字...",
 )
 
 # ---------- 输入区：来源（可选） ----------
@@ -317,40 +433,22 @@ source = st.text_input(
     placeholder="书名 / 文章名 / 视频名",
 )
 
-# ---------- 输入区：自定义背景图（可选） ----------
-st.subheader("🖼️ 自定义背景图（可选）")
+# ---------- 背景图上传 ----------
 uploaded_bg = st.file_uploader(
-    "上传一张你喜欢的图片作为卡片背景",
+    "🖼️ 选择背景图（可选，不上传则随机使用背景库）",
     type=["jpg", "jpeg", "png", "webp"],
-    help="不上传则随机使用背景库中的图片；上传后优先使用你选的图",
+    help="上传一张你喜欢的图片作为卡片背景",
 )
-# 如果上传了图片，显示一个勾选项：是否保存到背景库
-save_to_library = False  # 👈 默认不保存
+save_to_library = False
 if uploaded_bg is not None:
     save_to_library = st.checkbox(
-        "💾 保存到背景库（以后生成的卡片也可能随机用到这张图）",
+        "保存到背景库（以后可能随机用到）",
         value=False,
-        help="勾选后，这张图会复制保存到 assets/backgrounds/ 文件夹",
     )
-    # 预览上传的图片，让用户确认是自己想要的
-    st.image(uploaded_bg, caption="你上传的背景图预览", width=300)
+    st.image(uploaded_bg, caption="背景图预览", width=250)
 
-# ---------- 按钮区：一行放两个按钮 ----------
-col1, col2 = st.columns([1, 1])
-# 👆 st.columns 把一行分成若干列，[1,1] 表示等宽两列
-
-with col1:
-    # type="primary" 让按钮显示为蓝色高亮（主要操作）
-    generate_btn = st.button("🚀 生成卡片", type="primary", use_container_width=True)
-    # 👆 "生成"按钮：点击后触发 AI 处理
-
-with col2:
-    clear_btn = st.button("🗑️ 清空", use_container_width=True)
-    # 👆 "清空"按钮：清空所有输入
-
-# 如果点了"清空"按钮
-if clear_btn:
-    st.rerun()  # 👆 刷新整个页面，相当于 F5，所有输入都会清空
+# ---------- 生成卡片按钮 ----------
+generate_btn = st.button("✨ 生成卡片", type="primary", use_container_width=True)
 
 st.divider()
 
@@ -361,210 +459,201 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
     if not input_text.strip():
         # .strip() 去掉首尾空格后，如果是空的 → 用户没输入
         st.warning("⚠️ 请先输入文本")  # 👆 黄色警告提示
-    # ---------- 安全检查2：有没有填 API Key ----------
-    elif not api_key:
-        st.warning("⚠️ 请先在左侧填写 API Key")
-    else:
-        # ---------- 创建 Dify 客户端 ----------
-        client = DifyClient(
-            api_key=api_key,
-            base_url=base_url,
-            user_id=user_id,
-            input_key=input_key,
-        )
+    # ---------- 安全检查2：API Key 检查已禁用（使用固定数据模式） ----------
+    # elif not api_key:
+    #     st.warning("⚠️ 请先在左侧填写 API Key")
+    # else:
+    #     # ---------- 创建 Dify 客户端（已禁用） ----------
+    #     client = DifyClient(
+    #         api_key=api_key,
+    #         base_url=base_url,
+    #         user_id=user_id,
+    #         input_key=input_key,
+    #     )
+    #
+    #     # ---------- 打包输入数据 ----------
+    #     inputs = {input_key: input_text}
+    #     if source:
+    #         inputs["source"] = source
+    #
+    #     status_placeholder = st.empty()
+    #     st.info(f"调试：input_key={input_key}, 模式=Dify 工作流调用")
+    #     status_placeholder.info("🤖 正在生成卡片...")
+    #
+    #     workflow_outputs = {}
+    #     card_data = {}
+    #     extract_mode = ""
+    #     workflow_id = ""
+    #
+    #     # ========== 调用 Dify 工作流（已禁用，节省 tokens） ==========
+    #     for event in client.run_workflow_streaming(inputs=inputs):
+    #         event_type = event.get("event", "")
+    #         if event_type == "error":
+    #             status_placeholder.empty()
+    #             st.error(f"❌ 生成失败: {event.get('message', '未知错误')}")
+    #             if "status_code" in event:
+    #                 st.write(f"**状态码**: {event['status_code']}")
+    #             break
+    #         elif event_type == "workflow_started":
+    #             workflow_id = event.get("workflow_run_id", "")
+    #             status_placeholder.info(f"🚀 工作流已启动 (ID: {workflow_id[:8]}...)")
+    #         elif event_type == "node_started":
+    #             node_title = event.get("data", {}).get("title", "")
+    #             status_placeholder.info(f"⏳ 执行中: {node_title}...")
+    #         elif event_type == "node_finished":
+    #             node_title = event.get("data", {}).get("title", "")
+    #             status_placeholder.success(f"✅ 完成: {node_title}")
+    #         elif event_type == "workflow_finished":
+    #             raw_data = event.get("data") or {}
+    #             workflow_outputs = raw_data.get("outputs") or {}
+    #             card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
+    #             status_placeholder.empty()
+    #             if extract_mode != "empty":
+    #                 field_count = len(card_data)
+    #                 st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
+    #             else:
+    #                 st.warning("⚠️ 未提取到输出内容")
+    #                 with st.expander("🔍 调试：workflow_finished 原始事件"):
+    #                     st.json(event)
+    #         elif event_type == "ping":
+    #             pass
 
-        # ---------- 打包输入数据 ----------
-        # 把 input_key（比如 "y"）作为 key，用户输入的文字作为 value
-        # 比如：{"y": "人生最大的遗憾..."}
-        inputs = {input_key: input_text}
-        if source:
-            inputs["source"] = source  # 👆 如果填了来源，也加进去
+    # ===== 使用固定卡片数据（跳过 Dify API 调用，节省 tokens） =====
+    card_data = {
+        "title": "偶然表象下的必然积累",
+        "quote": "真的猛士，敢于直面惨淡的人生，敢于正视淋漓的鲜血。——《记念刘和珍君》",
+        "source_quote": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。——罗曼·罗兰",
+        "summary": "成功并非纯粹的运气博弈，而是持续行动与因果律的精确兑现。",
+        "book": "《纳瓦尔宝典》",
+        "movie": "《肖申克的救赎》",
+        "keywords": "运气、长期主义、因果律、持续行动",
+    }
+    extract_mode = "fixed"
+    workflow_outputs = {}
+    workflow_id = ""
+    st.success("✅ 卡片数据已就绪（固定数据模式）")
 
-        # ---------- 占位符：先占坑，后续动态更新内容 ----------
-        status_placeholder = st.empty()
-        # 👆 st.empty() 创建一个"空容器"，之后可以往里面放东西、换内容、或者清空
-        #    类比：贴了一张便利贴，上面写什么可以随时改
+    # ===== 循环结束，展示最终结果 =====
 
-        # ---------- 调试信息 ----------
-        st.info(f"调试：input_key={input_key}, 模式=Dify 工作流调用")
-        # 👆 显示当前实际发送的变量名和内容，方便排查问题
+    # ---------- 判断 card_data 是否包含有效的卡片字段 ----------
+    # 有效字段：title、quote、summary 中的至少一个
+    card_field_names = {"title", "quote", "summary"}
+    has_card_fields = bool(card_field_names & set(card_data.keys()))
+    # 👆 取交集：card_data 的 key 中有多少个是有效的卡片字段名
 
-        status_placeholder.info("🤖 正在生成卡片...")
-        # 👆 显示蓝色信息提示
+    if card_data and has_card_fields:
+        # ---------- 有卡片数据：生成并展示图片 ----------
+        st.subheader("🖼️ 生成的卡片")
 
-        workflow_outputs = {}  # 👆 存储工作流最终输出的完整 outputs 字典
-        card_data = {}  # 👆 提取后的卡片数据
-        extract_mode = ""  # 👆 提取模式（single_json / multi_field / empty）
-        workflow_id = ""  # 👆 存储工作流运行 ID
+        # ===== 调试面板：查看数据链路每一步 =====
+        with st.expander("🔍 调试：查看数据链路"):
+            tab1, tab2, tab3 = st.tabs(["Dify Outputs", "提取模式", "Card Data"])
 
-        # ========== 调用 Dify 工作流 ==========
-        for event in client.run_workflow_streaming(inputs=inputs):
-            event_type = event.get("event", "")
-            if event_type == "error":
-                status_placeholder.empty()
-                st.error(f"❌ 生成失败: {event.get('message', '未知错误')}")
-                if "status_code" in event:
-                    st.write(f"**状态码**: {event['status_code']}")
-                break
-            elif event_type == "workflow_started":
-                workflow_id = event.get("workflow_run_id", "")
-                status_placeholder.info(f"🚀 工作流已启动 (ID: {workflow_id[:8]}...)")
-            elif event_type == "node_started":
-                node_title = event.get("data", {}).get("title", "")
-                status_placeholder.info(f"⏳ 执行中: {node_title}...")
-            elif event_type == "node_finished":
-                node_title = event.get("data", {}).get("title", "")
-                status_placeholder.success(f"✅ 完成: {node_title}")
-            elif event_type == "workflow_finished":
-                raw_data = event.get("data") or {}
-                workflow_outputs = raw_data.get("outputs") or {}
-                card_data, extract_mode = _extract_card_data_from_outputs(workflow_outputs)
-                status_placeholder.empty()
-                if extract_mode != "empty":
-                    field_count = len(card_data)
-                    st.success(f"✅ 生成完成！提取模式：{extract_mode}，共 {field_count} 个字段")
+            with tab1:
+                st.caption("Dify 工作流返回的原始 outputs：")
+                st.json(workflow_outputs)
+                # 👆 看看 Dify 到底输出了哪些变量，叫什么名字
+
+            with tab2:
+                st.caption(f"提取模式：**{extract_mode}**")
+                if extract_mode == "multi_field":
+                    st.info("""
+                    **多字段模式**：Dify 工作流把 title、quote、summary、book、movie
+                    等字段作为独立的输出变量。前端会自动把它们合并成卡片数据。
+                    """)
+                elif extract_mode == "single_json":
+                    st.info("""
+                    **单 JSON 模式**：Dify 工作流把整个卡片设计打包成一个 JSON 字符串输出。
+                    前端解析这个 JSON 得到卡片数据。
+                    """)
                 else:
-                    st.warning("⚠️ 未提取到输出内容")
-                    with st.expander("🔍 调试：workflow_finished 原始事件"):
-                        st.json(event)
-            elif event_type == "ping":
-                pass
+                    st.warning(f"未知模式: {extract_mode}")
 
-        # ===== 使用固定卡片数据（跳过 Dify API 调用） =====
-        # card_data = {
-        #     "title": "偶然表象下的必然积累",
-        #     "quote": "真的猛士，敢于直面惨淡的人生，敢于正视淋漓的鲜血。——《记念刘和珍君》",
-        #     "source_quote": "世界上只有一种真正的英雄主义，那就是在认清生活的真相后依然热爱生活。——罗曼·罗兰",
-        #     "summary": "成功并非纯粹的运气博弈，而是持续行动与因果律的精确兑现。",
-        #     "book": "《纳瓦尔宝典》",
-        #     "movie": "《肖申克的救赎》",
-        #     "keywords": "运气、长期主义、因果律、持续行动",
-        # }
-        # extract_mode = "fixed"
-        # status_placeholder.empty()
-        # st.success("✅ 卡片数据已就绪（固定数据模式）")
-
-        # ===== 循环结束，展示最终结果 =====
-
-        # ---------- 判断 card_data 是否包含有效的卡片字段 ----------
-        # 有效字段：title、quote、summary 中的至少一个
-        card_field_names = {"title", "quote", "summary"}
-        has_card_fields = bool(card_field_names & set(card_data.keys()))
-        # 👆 取交集：card_data 的 key 中有多少个是有效的卡片字段名
-
-        if card_data and has_card_fields:
-            # ---------- 有卡片数据：生成并展示图片 ----------
-            st.subheader("🖼️ 生成的卡片")
-
-            # ===== 调试面板：查看数据链路每一步 =====
-            with st.expander("🔍 调试：查看数据链路"):
-                tab1, tab2, tab3 = st.tabs(["Dify Outputs", "提取模式", "Card Data"])
-
-                with tab1:
-                    st.caption("Dify 工作流返回的原始 outputs：")
-                    st.json(workflow_outputs)
-                    # 👆 看看 Dify 到底输出了哪些变量，叫什么名字
-
-                with tab2:
-                    st.caption(f"提取模式：**{extract_mode}**")
-                    if extract_mode == "multi_field":
-                        st.info("""
-                        **多字段模式**：Dify 工作流把 title、quote、summary、book、movie
-                        等字段作为独立的输出变量。前端会自动把它们合并成卡片数据。
-                        """)
-                    elif extract_mode == "single_json":
-                        st.info("""
-                        **单 JSON 模式**：Dify 工作流把整个卡片设计打包成一个 JSON 字符串输出。
-                        前端解析这个 JSON 得到卡片数据。
-                        """)
-                    else:
-                        st.warning(f"未知模式: {extract_mode}")
-
-                with tab3:
-                    st.json(card_data)
-                    # 👆 最终用来生成图片的数据
-
-            # ===== 生成图片 =====
-            try:
-                # ===== 处理自定义背景图 =====
-                custom_bg = None  # 👈 默认 None → 走随机背景逻辑
-                if uploaded_bg is not None:
-                    # 把上传的文件读成 PIL 图片对象
-                    custom_bg = Image.open(uploaded_bg)
-                    # 如果用户勾选了"保存到背景库"，就把图片存到 backgrounds 文件夹
-                    if save_to_library:
-                        # 生成不重复的文件名：user_ + 时间戳 + 原后缀
-                        bg_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        bg_suffix = Path(uploaded_bg.name).suffix.lower() or ".jpg"
-                        bg_filename = f"user_{bg_timestamp}{bg_suffix}"
-                        bg_save_path = BACKGROUNDS_DIR / bg_filename
-                        # 保存到背景库（转成 RGB 避免透明通道导致 jpg 保存报错）
-                        custom_bg.convert("RGB").save(bg_save_path)
-                        st.info(f"💾 背景图已保存到背景库: {bg_filename}")
-
-                with st.spinner("🎨 正在渲染卡片图片..."):
-                    # 生成卡片图片（传入 custom_bg；为 None 时自动走随机背景）
-                    card_image = generate_card_image(card_data, custom_bg=custom_bg)
-
-                # ===== 保存图片到本地 =====
-                # 生成安全的文件名（去掉特殊字符）
-                title_for_filename = re.sub(r'[\\/:*?"<>|]', '', card_data.get("title", "知识卡片"))
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                image_filename = f"{title_for_filename}_{timestamp}.png"
-                image_path = GENERATED_DIR / image_filename
-                card_image.save(image_path, format="PNG")
-
-                # ===== 保存卡片到数据库 =====
-                db = get_db()
-                card_id = db.save_card(card_data, str(image_path))
-                st.success(f"✅ 卡片已保存到卡片书（ID: {card_id}）")
-
-                # ===== 展示图片 =====
-                st.image(
-                    card_image,
-                    caption=card_data.get("title", "知识卡片"),
-                    width=500,
-                )
-
-                # ===== 下载按钮 =====
-                buf = io.BytesIO()
-                card_image.save(buf, format="PNG")
-                buf.seek(0)
-
-                download_filename = f"{card_data.get('title', '知识卡片')}.png"
-                st.download_button(
-                    label="📥 下载卡片图片",
-                    data=buf.getvalue(),
-                    file_name=download_filename,
-                    mime="image/png",
-                    use_container_width=True,
-                )
-
-            except Exception as img_error:
-                st.error(f"❌ 图片生成失败: {str(img_error)}")
-                st.warning("回退为 JSON 展示：")
+            with tab3:
                 st.json(card_data)
+                # 👆 最终用来生成图片的数据
 
-        elif card_data:
-            # ---------- card_data 有内容但缺少有效卡片字段（如只有 raw_text） ----------
-            st.warning("⚠️ 输出数据缺少卡片字段（title/quote/summary），以原始数据展示：")
-            with st.expander("🔍 调试：查看原始数据"):
-                st.caption("Dify 原始 outputs：")
-                st.json(workflow_outputs)
-                st.caption("提取后的 card_data：")
-                st.json(card_data)
-            raw_text = card_data.get("raw_text", json.dumps(card_data, ensure_ascii=False))
-            st.markdown(raw_text)
+        # ===== 生成图片 =====
+        try:
+            # ===== 处理自定义背景图 =====
+            custom_bg = None  # 👈 默认 None → 走随机背景逻辑
+            if uploaded_bg is not None:
+                # 把上传的文件读成 PIL 图片对象
+                custom_bg = Image.open(uploaded_bg)
+                # 如果用户勾选了"保存到背景库"，就把图片存到 backgrounds 文件夹
+                if save_to_library:
+                    # 生成不重复的文件名：user_ + 时间戳 + 原后缀
+                    bg_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    bg_suffix = Path(uploaded_bg.name).suffix.lower() or ".jpg"
+                    bg_filename = f"user_{bg_timestamp}{bg_suffix}"
+                    bg_save_path = BACKGROUNDS_DIR / bg_filename
+                    # 保存到背景库（转成 RGB 避免透明通道导致 jpg 保存报错）
+                    custom_bg.convert("RGB").save(bg_save_path)
+                    st.info(f"💾 背景图已保存到背景库: {bg_filename}")
 
-        else:
-            # ---------- 完全没内容 ----------
-            st.warning("⚠️ 工作流完成但未返回任何内容，请检查 Dify 工作流配置")
-            with st.expander("🔍 调试：workflow_outputs"):
-                st.json(workflow_outputs)
+            with st.spinner("🎨 正在渲染卡片图片..."):
+                # 生成卡片图片（传入 custom_bg；为 None 时自动走随机背景）
+                card_image = generate_card_image(card_data, custom_bg=custom_bg)
 
-        # ---------- 显示工作流 ID（方便追踪） ----------
-        if workflow_id:
-            st.caption(f"工作流 ID: `{workflow_id}`")
+            # ===== 保存图片到本地 =====
+            # 生成安全的文件名（去掉特殊字符）
+            title_for_filename = re.sub(r'[\\/:*?"<>|]', '', card_data.get("title", "知识卡片"))
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            image_filename = f"{title_for_filename}_{timestamp}.png"
+            image_path = GENERATED_DIR / image_filename
+            card_image.save(image_path, format="PNG")
+
+            # ===== 保存卡片到数据库 =====
+            db = get_db()
+            card_id = db.save_card(card_data, str(image_path))
+            st.success(f"✅ 卡片已保存到卡片书（ID: {card_id}）")
+
+            # ===== 展示图片 =====
+            st.image(
+                card_image,
+                caption=card_data.get("title", "知识卡片"),
+                width=500,
+            )
+
+            # ===== 下载按钮 =====
+            buf = io.BytesIO()
+            card_image.save(buf, format="PNG")
+            buf.seek(0)
+
+            download_filename = f"{card_data.get('title', '知识卡片')}.png"
+            st.download_button(
+                label="📥 下载卡片图片",
+                data=buf.getvalue(),
+                file_name=download_filename,
+                mime="image/png",
+                use_container_width=True,
+            )
+
+        except Exception as img_error:
+            st.error(f"❌ 图片生成失败: {str(img_error)}")
+            st.warning("回退为 JSON 展示：")
+            st.json(card_data)
+
+    elif card_data:
+        # ---------- card_data 有内容但缺少有效卡片字段（如只有 raw_text） ----------
+        st.warning("⚠️ 输出数据缺少卡片字段（title/quote/summary），以原始数据展示：")
+        with st.expander("🔍 调试：查看原始数据"):
+            st.caption("Dify 原始 outputs：")
+            st.json(workflow_outputs)
+            st.caption("提取后的 card_data：")
+            st.json(card_data)
+        raw_text = card_data.get("raw_text", json.dumps(card_data, ensure_ascii=False))
+        st.markdown(raw_text)
+
+    else:
+        # ---------- 完全没内容 ----------
+        st.warning("⚠️ 工作流完成但未返回任何内容，请检查 Dify 工作流配置")
+        with st.expander("🔍 调试：workflow_outputs"):
+            st.json(workflow_outputs)
+
+    # ---------- 显示工作流 ID（方便追踪） ----------
+    if workflow_id:
+        st.caption(f"工作流 ID: `{workflow_id}`")
 
 # ========================== 第八段：卡片书页面 ==========================
 

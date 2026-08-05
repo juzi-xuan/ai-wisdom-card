@@ -241,6 +241,71 @@ def _load_lxgw_wenkai_font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
+def _load_jason_handwriting_font(size: int) -> ImageFont.FreeTypeFont:
+    """
+    加载 JasonHandWriting 手写体（用于卡片标题）
+
+    加载优先级：
+    1. 繁体中文手写体 JasonHandwriting1-Regular.ttf（支持中文）
+    2. 其他繁体变体回退
+    3. 拉丁版本回退
+    4. 系统楷体回退
+    """
+    jason_dir = FONTS_DIR / "JasonHandWritingFonts-20251204"
+    candidates = []
+
+    if jason_dir.exists():
+        tw_dir = jason_dir / "tw"
+        latin_dir = jason_dir / "latin"
+
+        # 优先使用繁体中文手写体
+        if tw_dir.exists():
+            candidates.extend([
+                (str(tw_dir / "JasonHandwriting1-Regular.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting2-Regular.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting3-Regular.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting4-Regular.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting5-Regular.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting6-Regular.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting7-Regular.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting8-Regular.ttf"), 0),
+                # SemiBold 变体
+                (str(tw_dir / "JasonHandwriting1-SemiBold.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting2-SemiBold.ttf"), 0),
+                (str(tw_dir / "JasonHandwriting3-SemiBold.ttf"), 0),
+            ])
+
+        # 拉丁版本回退
+        if latin_dir.exists():
+            candidates.extend([
+                (str(latin_dir / "JasonHandwriting-Regular.ttf"), 0),
+                (str(latin_dir / "JasonHandwriting-Bold.ttf"), 0),
+                (str(latin_dir / "JasonHandwriting-SemiBold.ttf"), 0),
+            ])
+
+    # 系统字体回退
+    candidates.extend([
+        ("C:/Windows/Fonts/simkai.ttf", 0),       # 楷体
+        ("C:/Windows/Fonts/simfang.ttf", 0),      # 仿宋
+        ("C:/Windows/Fonts/simsun.ttc", 0),       # 宋体
+    ])
+
+    for font_path, font_index in candidates:
+        try:
+            logger.debug(f"加载 JasonHandWriting: {font_path}, size={size}")
+            font = ImageFont.truetype(font_path, size, index=font_index)
+            test_bbox = font.getbbox("测试")
+            if test_bbox[3] - test_bbox[1] <= 1:
+                logger.warning(f"字体 {font_path} bbox 异常 {test_bbox}，跳过")
+                continue
+            return font
+        except (OSError, IOError):
+            continue
+
+    logger.warning(f"未找到可用的 JasonHandWriting 字体, size={size}")
+    return ImageFont.load_default()
+
+
 def _load_sourcehan_serif_font(size: int) -> ImageFont.FreeTypeFont:
     """
     加载 SourceHanSerif 思源宋体（用于金句）
@@ -691,9 +756,9 @@ class CardImageGenerator:
         self._padding_h: int = max(10, int(PADDING_H * self._scale))
         self._padding_v: int = max(10, int(PADDING_V * self._scale))
 
-        # ---------- 字体（v5：霞鹜文楷标题 + 思源宋体金句 + 雅黑正文） ----------
-        # 标题用 LXGW WenKai Bold 霞鹜文楷粗体
-        self.font_title_handwriting = _load_lxgw_wenkai_font(max(8, int(72 * self._scale)))
+        # ---------- 字体（v6：JasonHandWriting 标题 + 思源宋体金句 + 雅黑正文） ----------
+        # 标题用 JasonHandWriting 手写体
+        self.font_title_handwriting = _load_jason_handwriting_font(max(8, int(72 * self._scale)))
 
         # 引用金句用 SourceHanSerif 思源宋体
         self.font_quote_handwriting = _load_sourcehan_serif_font(max(8, int(42 * self._scale)))
@@ -722,7 +787,7 @@ class CardImageGenerator:
         self.font_rec_title = self.font_panel_title
         self.font_rec_name = self.font_subtitle
 
-        logger.info(f"CardImageGenerator v5 初始化, 画布={self.width}x{self.height}, 字体: LXGW WenKai Bold(标题)/SourceHanSerif(金句)/Microsoft YaHei(正文)")
+        logger.info(f"CardImageGenerator v6 初始化, 画布={self.width}x{self.height}, 字体: JasonHandWriting(标题)/SourceHanSerif(金句)/Microsoft YaHei(正文)")
 
     def generate(self, card_data: Dict[str, Any], custom_bg: Optional[Image.Image] = None) -> Image.Image:
         """生成阅读书签风格知识卡片"""
