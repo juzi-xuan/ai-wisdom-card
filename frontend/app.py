@@ -214,17 +214,46 @@ st.title("卡片生成器")
 
 # ========================== 第四段半：注入背景图 + 浮动动画 CSS ==========================
 import base64
-_assets_dir = Path.cwd() / "assets"
+_assets_dir = Path.cwd().parent / "assets"
+if not _assets_dir.exists():
+    _assets_dir = Path.cwd() / "assets"
 
-# 加载背景图
+# 加载手写字体（使用系统字体，避免 base64 嵌入过大）
+font_css = """
+@font-face {
+    font-family: 'Ma Shan Zheng';
+    src: local('KaiTi'), local('STKaiti'), local('楷体');
+    font-weight: normal;
+    font-style: normal;
+}
+@font-face {
+    font-family: 'LiuJian Mao Cao';
+    src: local('STKaiti'), local('KaiTi'), local('楷体');
+    font-weight: normal;
+    font-style: normal;
+}
+"""
+
+# 加载背景图（缩放到合理尺寸后嵌入）
 bg_css = ""
 bg_path = _assets_dir / "前端背景.png"
 if bg_path.exists():
-    with open(bg_path, "rb") as f:
-        bg_data = base64.b64encode(f.read()).decode()
-    bg_css = f"""
+    try:
+        from PIL import Image as _PIL
+        import io as _io
+        _bg_img = _PIL.open(bg_path)
+        # 缩放到宽度 1200px 以内
+        _w, _h = _bg_img.size
+        if _w > 1200:
+            _new_w = 1200
+            _new_h = int(_h * 1200 / _w)
+            _bg_img = _bg_img.resize((_new_w, _new_h), _PIL.LANCZOS)
+        _buf = _io.BytesIO()
+        _bg_img.save(_buf, format="JPEG", quality=85, optimize=True)
+        _bg_data = base64.b64encode(_buf.getvalue()).decode()
+        bg_css = f"""
     section.stMain {{
-        background-image: url("data:image/png;base64,{bg_data}") !important;
+        background-image: url("data:image/jpeg;base64,{_bg_data}") !important;
         background-size: cover !important;
         background-position: center center !important;
         background-repeat: no-repeat !important;
@@ -233,14 +262,126 @@ if bg_path.exists():
     [data-testid="stAppViewContainer"] > div {{
         background: transparent !important;
     }}
-    """
+        """
+    except Exception:
+        bg_css = ""
+
+# 加载并处理古风素材图（去白底、旋转等）
+from PIL import Image as PILImage
+import io
+
+def _remove_white_bg(img, threshold=245):
+    """将接近白色的像素转为透明（使用 numpy 加速，更宽容的判断）"""
+    import numpy as np
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    arr = np.array(img)
+    # 判断条件：像素亮度（平均）>= threshold，且最大通道差 <= 15（灰度/白色）
+    r, g, b = arr[:,:,0].astype(int), arr[:,:,1].astype(int), arr[:,:,2].astype(int)
+    brightness = (r + g + b) / 3
+    max_diff = np.maximum(np.maximum(np.abs(r.astype(int)-g.astype(int)), np.abs(g.astype(int)-b.astype(int))), np.abs(r.astype(int)-b.astype(int)))
+    white_mask = (brightness >= threshold) & (max_diff <= 20)
+    arr[white_mask, 3] = 0
+    return Image.fromarray(arr)
+
+def _remove_color_bg(img, bg_color=(255, 255, 255), tolerance=30):
+    """将指定颜色（含容差）转为完全透明"""
+    import numpy as np
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    arr = np.array(img)
+    r, g, b = arr[:,:,0].astype(int), arr[:,:,1].astype(int), arr[:,:,2].astype(int)
+    mask = (np.abs(r - bg_color[0]) <= tolerance) & \
+           (np.abs(g - bg_color[1]) <= tolerance) & \
+           (np.abs(b - bg_color[2]) <= tolerance)
+    arr[mask, 3] = 0
+    return Image.fromarray(arr)
+
+def _trim_transparent(img):
+    """裁剪掉图片四周的透明区域"""
+    import numpy as np
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    arr = np.array(img)
+    alpha = arr[:,:,3]
+    rows = np.any(alpha > 10, axis=1)
+    cols = np.any(alpha > 10, axis=0)
+    if rows.any():
+        ymin, ymax = np.where(rows)[0][[0, -1]]
+        xmin, xmax = np.where(cols)[0][[0, -1]]
+        img = img.crop((xmin, ymin, xmax+1, ymax+1))
+    return img
+
+def _process_img(img_path, rotate=0, max_size=None, remove_bg=False, bg_color=(255,255,255), tolerance=30):
+    """加载图片并处理：去背景、旋转、裁剪、缩放"""
+    if not img_path.exists():
+        return None
+    img = PILImage.open(img_path)
+    
+    # 确保 RGBA 模式
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    
+    # 去背景
+    if remove_bg:
+        img = _remove_color_bg(img, bg_color, tolerance)
+    
+    # 旋转（使用透明背景填充扩展区域）
+    if rotate != 0:
+        img = img.rotate(rotate, expand=True, resample=PILImage.BICUBIC, fillcolor=(0,0,0,0))
+        # 裁剪掉旋转后多余的透明边框
+        img = _trim_transparent(img)
+    
+    # 缩放（保持比例）
+    if max_size:
+        w, h = img.size
+        if max(w, h) > max_size:
+            if w > h:
+                new_w = max_size
+                new_h = int(h * max_size / w)
+            else:
+                new_h = max_size
+                new_w = int(w * max_size / h)
+            img = img.resize((new_w, new_h), PILImage.LANCZOS)
+    
+    # 转为 base64
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/png;base64,{b64}"
+
+# 处理三张素材
+# 便利贴：去除白色背景（保留米黄色主体），不旋转
+_note_b64 = _process_img(_assets_dir / "便利贴本体.png", rotate=0, max_size=600, remove_bg=True, bg_color=(255,255,255), tolerance=15)
+
+# 羽毛笔：去除白色背景，顺时针旋转45°
+_feather_b64 = _process_img(_assets_dir / "羽毛笔.png", rotate=45, max_size=220, remove_bg=True, bg_color=(255,255,255), tolerance=18)
+
+# 书签：去除白色背景，顺时针旋转90°
+_bookmark_b64 = _process_img(_assets_dir / "书签.png", rotate=-90, max_size=130, remove_bg=True, bg_color=(255,255,255), tolerance=40)
 
 st.markdown(f"""
 <style>
+/* ===== 加载手写字体 ===== */
+{font_css}
+
+/* ===== 古风卷轴 · 全局样式 ===== */
+
 @keyframes sprite-float {{
     0%, 100% {{ transform: translateY(0); }}
     50% {{ transform: translateY(-12px); }}
 }}
+@keyframes ink-spread {{
+    0% {{ opacity: 0; transform: scale(0.8); }}
+    100% {{ opacity: 1; transform: scale(1); }}
+}}
+@keyframes seal-press {{
+    0% {{ transform: scale(1.3) rotate(-5deg); }}
+    60% {{ transform: scale(0.95) rotate(-5deg); }}
+    100% {{ transform: scale(1) rotate(-5deg); }}
+}}
+
+/* 小精灵浮动 */
 .sprite-container {{
     display: flex;
     justify-content: center;
@@ -249,62 +390,431 @@ st.markdown(f"""
 .sprite-img {{
     animation: sprite-float 3s ease-in-out infinite;
     filter: drop-shadow(0 12px 20px rgba(180, 140, 60, 0.25));
-    width: 300px;
+    width: 280px;
 }}
-.stApp, section.stMain, section.stMain > div, section.stMain > div > div {{
+
+/* 透明背景层（仅内部容器，section.stMain 保留背景图） */
+.stApp, section.stMain > div, section.stMain > div > div {{
     background: transparent !important;
 }}
-.stTextArea > div > div > textarea,
-.stTextInput > div > div > input {{
-    background: rgba(255, 255, 255, 0.88) !important;
-    backdrop-filter: blur(8px);
+
+/* ===== 古风主题配色 ===== */
+:root {{
+    --parchment-light: #f7ecd4;
+    --parchment: #f0dfbf;
+    --parchment-dark: #d9c49a;
+    --ink-dark: #2c1810;
+    --ink-medium: #4a3520;
+    --gold: #b8860b;
+    --gold-light: #d4a843;
+    --gold-dark: #8b6914;
+    --seal-red: #a52a2a;
+    --seal-red-light: #c0392b;
+    --scroll-end: #8b6914;
 }}
+
+/* ===== 卷轴容器 ===== */
+.scroll-container {{
+    position: relative;
+    padding: 28px 40px 44px 40px;
+    margin: 20px 0;
+    background: linear-gradient(180deg, var(--parchment-light) 0%, var(--parchment) 15%, var(--parchment) 85%, var(--parchment-dark) 100%);
+    border: 2px solid var(--gold);
+    border-radius: 4px;
+    box-shadow:
+        inset 0 0 60px rgba(139, 105, 20, 0.1),
+        inset 0 30px 80px rgba(139, 105, 20, 0.08),
+        0 8px 24px rgba(0, 0, 0, 0.12),
+        0 4px 8px rgba(139, 105, 20, 0.3);
+}}
+
+/* 卷轴两端的滚轴 */
+.scroll-container::before,
+.scroll-container::after {{
+    content: '';
+    position: absolute;
+    left: -6px;
+    right: -6px;
+    height: 18px;
+    background: linear-gradient(180deg, var(--gold-dark) 0%, var(--gold) 40%, var(--gold-light) 50%, var(--gold) 60%, var(--gold-dark) 100%);
+    border: 2px solid var(--gold-dark);
+    border-radius: 10px;
+    box-shadow:
+        0 2px 6px rgba(0, 0, 0, 0.2),
+        inset 0 1px 2px rgba(255, 248, 220, 0.5);
+}}
+.scroll-container::before {{
+    top: -14px;
+}}
+.scroll-container::after {{
+    bottom: -14px;
+}}
+
+/* 羊皮纸纹理 */
+.scroll-container > .scroll-texture {{
+    position: absolute;
+    inset: 0;
+    background-image:
+        radial-gradient(ellipse at 15% 25%, rgba(139, 105, 20, 0.08) 0%, transparent 40%),
+        radial-gradient(ellipse at 85% 75%, rgba(139, 105, 20, 0.06) 0%, transparent 35%),
+        radial-gradient(ellipse at 50% 50%, rgba(139, 105, 20, 0.03) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+}}
+.scroll-container > *:not(.scroll-texture) {{
+    position: relative;
+    z-index: 1;
+}}
+
+/* 羽毛笔装饰（左上角） */
+.feather-pen {{
+    position: absolute;
+    top: -18px;
+    left: 24px;
+    width: 80px;
+    height: 80px;
+    z-index: 10;
+    pointer-events: none;
+    animation: ink-spread 0.8s ease-out;
+}}
+.feather-pen svg {{
+    filter: drop-shadow(2px 3px 4px rgba(0, 0, 0, 0.25));
+}}
+
+/* 红色印章装饰（右下角） */
+.red-seal {{
+    position: absolute;
+    bottom: -20px;
+    right: 30px;
+    width: 60px;
+    height: 60px;
+    z-index: 10;
+    pointer-events: none;
+    animation: seal-press 0.6s ease-out;
+}}
+.red-seal svg {{
+    filter: drop-shadow(1px 2px 3px rgba(0, 0, 0, 0.3));
+}}
+
+/* 卷轴标签装饰 */
+.scroll-label {{
+    font-family: 'Ma Shan Zheng', 'LiuJian Mao Cao', 'KaiTi', 'STKaiti', serif;
+    color: var(--ink-dark);
+    font-size: 20px;
+    letter-spacing: 4px;
+    margin-bottom: 12px;
+    padding-left: 8px;
+    border-left: 3px solid var(--seal-red);
+    line-height: 1;
+}}
+
+/* ===== 文本域容器：便利贴风格（仅主区域） ===== */
+section.stMain .stTextArea {{
+    position: relative;
+    margin-top: 8px;
+    overflow: visible !important;
+}}
+section.stMain .stTextArea > div {{
+    background: {f'url("{_note_b64}") no-repeat center/100% 100%' if _note_b64 else '#f5edc6'} !important;
+    border: none !important;
+    border-radius: 2px !important;
+    box-shadow:
+        0 6px 18px rgba(0, 0, 0, 0.08),
+        0 2px 6px rgba(139, 105, 20, 0.12);
+    padding: 0 !important;
+    overflow: visible !important;
+}}
+section.stMain .stTextArea > div > div {{
+    background: transparent !important;
+    overflow: visible !important;
+}}
+section.stMain .stTextArea > div > div > textarea {{
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 52px 28px 36px 36px !important;
+    min-height: 360px !important;
+    font-family: 'Ma Shan Zheng', 'LiuJian Mao Cao', 'KaiTi', 'STKaiti', serif !important;
+    font-size: 16px !important;
+    line-height: 2.2 !important;
+    color: var(--ink-dark) !important;
+    box-shadow: none !important;
+    outline: none !important;
+    resize: vertical;
+}}
+section.stMain .stTextArea > div > div > textarea:focus {{
+    outline: none !important;
+    box-shadow: none !important;
+}}
+/* 只隐藏主区域的文本域标签 */
+section.stMain .stTextArea label {{
+    display: none !important;
+}}
+
+/* 装饰元素容器 */
+.deco-wrapper {{
+    position: relative;
+    margin-bottom: -24px;
+    z-index: 5;
+}}
+.deco-feather {{
+    position: absolute;
+    top: -38px;
+    left: -50px;
+    width: 110px;
+    height: 140px;
+    z-index: 10;
+    pointer-events: none;
+    filter: drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.15));
+}}
+.deco-bookmark {{
+    position: absolute;
+    bottom: -22px;
+    right: -8px;
+    width: 100px;
+    height: 60px;
+    z-index: 10;
+    pointer-events: none;
+    filter: drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.18));
+}}
+
+/* 隐藏原生占位提示中的滚动文字 */
+.stTextArea small {{
+    color: var(--ink-medium) !important;
+    opacity: 0.6;
+}}
+
+/* ===== 来源输入：下划线风格（仅主区域） ===== */
+section.stMain .stTextInput > div {{
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 1px solid var(--gold) !important;
+    border-radius: 0 !important;
+    padding: 6px 2px !important;
+    box-shadow: none !important;
+}}
+section.stMain .stTextInput > div:hover {{
+    border-bottom: 2px solid var(--gold) !important;
+}}
+section.stMain .stTextInput > div > div > input {{
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 4px 2px 4px 2px !important;
+    font-family: 'Ma Shan Zheng', 'LiuJian Mao Cao', 'KaiTi', serif !important;
+    font-size: 17px !important;
+    color: var(--ink-dark) !important;
+    box-shadow: none !important;
+    outline: none !important;
+    transition: all 0.3s ease;
+}}
+/* 保留侧边栏标签 */
+section.stSidebar .stTextInput label {{
+    display: block !important;
+    color: var(--ink-medium) !important;
+    font-family: 'Ma Shan Zheng', 'KaiTi', serif !important;
+    font-size: 14px !important;
+}}
+/* 只隐藏主区域的标签 */
+section.stMain .stTextInput label {{
+    display: none !important;
+}}
+
+/* ===== 文件上传：柔和羊皮纸 ===== */
 .stFileUploader {{
-    background: rgba(255, 255, 255, 0.88) !important;
-    border-radius: 10px;
+    background: linear-gradient(160deg, #faf2e0 0%, #f3e5c8 100%) !important;
+    border: 1px dashed var(--gold) !important;
+    border-radius: 4px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), inset 0 1px 3px rgba(139, 105, 20, 0.05);
+    margin-top: 16px;
 }}
+.stFileUploader > section {{
+    background: transparent !important;
+}}
+.stFileUploader p {{
+    color: var(--ink-medium) !important;
+    font-family: 'Ma Shan Zheng', 'KaiTi', serif !important;
+    font-size: 15px !important;
+}}
+.stFileUploader small {{
+    color: var(--ink-medium) !important;
+    opacity: 0.7;
+}}
+/* 隐藏主区域文件上传的原生标签（我们用自定义标签） */
+section.stMain .stFileUploader label {{
+    display: none !important;
+}}
+/* 文件上传标签自定义 */
+.upload-label {{
+    font-family: 'Ma Shan Zheng', 'LiuJian Mao Cao', 'KaiTi', serif;
+    color: var(--ink-dark);
+    font-size: 18px;
+    letter-spacing: 3px;
+    margin: 24px 0 4px 0;
+    padding-left: 8px;
+    border-left: 3px solid var(--gold);
+    line-height: 1;
+}}
+
+/* ===== 按钮：烫金风格 ===== */
 .stButton > button {{
-    background: rgba(255, 255, 255, 0.92) !important;
-    border-radius: 10px;
-    border: 1px solid rgba(180, 140, 60, 0.3);
-    transition: all 0.2s ease;
+    background: linear-gradient(145deg, var(--parchment-light) 0%, var(--parchment) 100%) !important;
+    color: var(--ink-dark) !important;
+    font-family: 'Ma Shan Zheng', 'LiuJian Mao Cao', 'KaiTi', serif !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    padding: 14px 32px !important;
+    border: 2px solid var(--gold) !important;
+    border-radius: 6px !important;
+    box-shadow:
+        0 0 0 1px rgba(255, 248, 220, 0.8) inset,
+        0 0 0 3px var(--gold-dark) inset,
+        0 0 0 4px rgba(255, 248, 220, 0.5) inset,
+        0 6px 20px rgba(139, 105, 20, 0.3),
+        0 2px 4px rgba(0, 0, 0, 0.15);
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    letter-spacing: 4px;
+    position: relative;
 }}
 .stButton > button:hover {{
-    background: rgba(255, 255, 255, 1) !important;
-    box-shadow: 0 4px 12px rgba(180, 140, 60, 0.2);
-    transform: translateY(-1px);
+    background: linear-gradient(145deg, #fdf2dc 0%, var(--parchment-light) 100%) !important;
+    box-shadow:
+        0 0 0 1px rgba(255, 248, 220, 0.8) inset,
+        0 0 0 3px var(--gold) inset,
+        0 0 0 4px rgba(255, 248, 220, 0.5) inset,
+        0 8px 25px rgba(139, 105, 20, 0.4),
+        0 3px 6px rgba(0, 0, 0, 0.2);
+    transform: translateY(-2px);
 }}
+.stButton > button:active {{
+    transform: translateY(1px);
+    box-shadow:
+        0 0 0 1px rgba(255, 248, 220, 0.8) inset,
+        0 0 0 3px var(--gold-dark) inset,
+        0 2px 8px rgba(139, 105, 20, 0.3);
+}}
+
+/* ===== 侧边栏：卷轴背板 ===== */
 .stSidebar {{
-    background: rgba(255, 253, 245, 0.95) !important;
-    backdrop-filter: blur(10px);
+    background: linear-gradient(180deg, var(--parchment-light) 0%, var(--parchment) 50%, var(--parchment-dark) 100%) !important;
+    border-right: 3px double var(--gold);
+    box-shadow: inset -4px 0 10px rgba(139, 105, 20, 0.15);
 }}
-h1, h2, h3, h4, h5, h6 {{
-    color: #5a4a2a !important;
-    text-shadow: 0 1px 3px rgba(255,255,255,0.6);
+.stSidebar .stTextInput > div > div > input {{
+    background: rgba(255, 248, 220, 0.6) !important;
+    border: 1px solid var(--gold) !important;
+    border-radius: 4px !important;
+    padding: 8px 12px !important;
+    font-family: inherit !important;
+    box-shadow: inset 0 1px 3px rgba(139, 105, 20, 0.1) !important;
 }}
-.stMarkdown {{
-    color: #4a3a1a;
+.stSidebar h1, .stSidebar h2, .stSidebar h3 {{
+    color: var(--ink-dark) !important;
+    font-family: 'Ma Shan Zheng', 'KaiTi', serif !important;
+    border-bottom: 2px solid var(--gold);
+    padding-bottom: 8px;
 }}
-hr {{
-    border-color: rgba(180, 140, 60, 0.25) !important;
+
+/* ===== 标题：墨色书法 ===== */
+h1 {{
+    color: var(--ink-dark) !important;
+    font-family: 'Ma Shan Zheng', 'LiuJian Mao Cao', 'KaiTi', serif !important;
+    font-size: 42px !important;
+    text-align: center !important;
+    letter-spacing: 12px !important;
+    text-shadow: 2px 2px 4px rgba(255, 248, 220, 0.8), 0 0 20px rgba(139, 105, 20, 0.2);
+    margin-bottom: 20px !important;
+    position: relative;
+    padding: 16px 0;
 }}
+h1::before, h1::after {{
+    content: '❈';
+    color: var(--gold);
+    font-size: 24px;
+    margin: 0 20px;
+    opacity: 0.6;
+}}
+
+h2, h3, h4 {{
+    color: var(--ink-dark) !important;
+    font-family: 'Ma Shan Zheng', 'KaiTi', serif !important;
+}}
+
+/* ===== 文字与标签 ===== */
+.stMarkdown, p, label, .stRadio label, .stSelectbox label {{
+    color: var(--ink-medium) !important;
+    font-family: 'Ma Shan Zheng', 'KaiTi', serif !important;
+}}
+.stTextArea label, .stTextInput label, .stFileUploader label {{
+    color: var(--ink-dark) !important;
+    font-family: 'Ma Shan Zheng', 'KaiTi', serif !important;
+    font-size: 18px !important;
+    font-weight: 400 !important;
+    letter-spacing: 2px;
+}}
+
+/* ===== 分割线：金色装饰 ===== */
+hr, .stDivider {{
+    border: none !important;
+    height: 2px !important;
+    background: linear-gradient(90deg, transparent 0%, var(--gold-dark) 20%, var(--gold) 50%, var(--gold-dark) 80%, transparent 100%) !important;
+    margin: 24px 0 !important;
+    position: relative;
+}}
+hr::before {{
+    content: '❖';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: transparent;
+    padding: 0 12px;
+    color: var(--gold);
+    font-size: 16px;
+}}
+
+/* ===== 信息提示框 ===== */
 .stInfo {{
-    background: rgba(255, 250, 235, 0.9) !important;
-    border-left-color: rgba(180, 140, 60, 0.5) !important;
+    background: linear-gradient(135deg, rgba(240, 223, 191, 0.95) 0%, rgba(247, 236, 212, 0.95) 100%) !important;
+    border: 1px solid var(--gold) !important;
+    border-left: 4px solid var(--seal-red) !important;
+    border-radius: 4px !important;
+    color: var(--ink-dark) !important;
 }}
-.stExpander summary {{
-    background: rgba(255, 250, 235, 0.85) !important;
-    border-radius: 8px;
-}}
-.stCard {{
-    background: rgba(255, 255, 255, 0.85) !important;
-}}
-[data-testid="stVerticalBlock"] > div {{
+
+/* ===== 通用容器透明 ===== */
+[data-testid="stVerticalBlock"] > div, .element-container {{
     background: transparent !important;
 }}
-.element-container {{
-    background: transparent !important;
+
+/* ===== 复选框古风 ===== */
+.stCheckbox input[type="checkbox"] {{
+    accent-color: var(--seal-red);
 }}
+
+/* ===== 标签/徽章 ===== */
+.stBadge {{
+    background: var(--gold) !important;
+    color: white !important;
+    font-family: 'Ma Shan Zheng', serif !important;
+}}
+
+/* ===== 滚动条 ===== */
+::-webkit-scrollbar {{
+    width: 8px;
+}}
+::-webkit-scrollbar-track {{
+    background: var(--parchment-dark);
+    border-radius: 4px;
+}}
+::-webkit-scrollbar-thumb {{
+    background: var(--gold);
+    border-radius: 4px;
+}}
+::-webkit-scrollbar-thumb:hover {{
+    background: var(--gold-dark);
+}}
+
 {bg_css}
 </style>
 """, unsafe_allow_html=True)
@@ -420,22 +930,54 @@ with st.sidebar:
 
 # ========================== 第六段：主区域（输入和生成） ==========================
 
-# ---------- 输入区：文字输入框 ----------
+# ---------- 羽毛笔装饰（左上角） ----------
+if _feather_b64:
+    st.markdown(f"""
+    <div class="deco-wrapper" style="position:relative;margin-bottom:-16px;">
+      <img src="{_feather_b64}" class="deco-feather" alt="羽毛笔" />
+    </div>
+    """, unsafe_allow_html=True)
+
+# ---------- 文本域（便利贴风格） ----------
 input_text = st.text_area(
     "文本",
-    height=140,
+    height=160,
     placeholder="输入你想生成卡片的文字...",
 )
 
-# ---------- 输入区：来源（可选） ----------
+# ---------- 书签装饰（右下角） ----------
+if _bookmark_b64:
+    st.markdown(f"""
+    <div style="position:relative;margin-top:-18px;margin-bottom:4px;">
+      <img src="{_bookmark_b64}" class="deco-bookmark" alt="书签" />
+    </div>
+    """, unsafe_allow_html=True)
+
+# ---------- 来源输入（图二风格：下划线 + 标签在上方） ----------
+st.markdown("""
+<div style="margin: 18px 0 2px 0; padding-left: 4px;">
+  <span style="font-family:'Ma Shan Zheng','KaiTi',serif; color:#2c1810; font-size:15px; letter-spacing:2px;">
+    来源（可选）
+  </span>
+</div>
+""", unsafe_allow_html=True)
+
 source = st.text_input(
     "来源（可选）",
     placeholder="书名 / 文章名 / 视频名",
 )
 
 # ---------- 背景图上传 ----------
+st.markdown("""
+<div style="margin: 20px 0 2px 0; padding-left: 4px;">
+  <span style="font-family:'Ma Shan Zheng','KaiTi',serif; color:#2c1810; font-size:15px; letter-spacing:2px;">
+    选择背景图（可选，不上传则随机使用背景库）
+  </span>
+</div>
+""", unsafe_allow_html=True)
+
 uploaded_bg = st.file_uploader(
-    "🖼️ 选择背景图（可选，不上传则随机使用背景库）",
+    "选择背景图（可选，不上传则随机使用背景库）",
     type=["jpg", "jpeg", "png", "webp"],
     help="上传一张你喜欢的图片作为卡片背景",
 )
@@ -448,9 +990,10 @@ if uploaded_bg is not None:
     st.image(uploaded_bg, caption="背景图预览", width=250)
 
 # ---------- 生成卡片按钮 ----------
-generate_btn = st.button("✨ 生成卡片", type="primary", use_container_width=True)
+st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+generate_btn = st.button("✦ 生 成 卡 片 ✦", type="primary", use_container_width=True)
 
-st.divider()
+st.markdown('<div style="text-align:center; margin: 20px 0; color: var(--gold); font-size: 18px; letter-spacing: 16px;">❈ ❈ ❈</div>', unsafe_allow_html=True)
 
 # ========================== 第七段：核心逻辑 —— 调用 Dify 并展示结果 ==========================
 
