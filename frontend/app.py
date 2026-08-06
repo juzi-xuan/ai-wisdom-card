@@ -31,6 +31,7 @@ from datetime import datetime  # 👉 datetime 是"时间戳"：生成唯一的�
 from pathlib import Path  # 👉 Path 是"地图导航"：处理文件和文件夹路径
 
 import streamlit as st  # 👉 streamlit 是"网页生成器"：把 Python 代码变成网页，简称 st
+import streamlit.components.v1 as components  # 用于执行 JavaScript
 
 # ---------- 让 Python 能"找到" backend 文件夹里的代码 ----------
 # 因为 dify_api.py 在 backend/ 文件夹里
@@ -396,6 +397,51 @@ st.markdown(f"""
 /* 透明背景层（仅内部容器，section.stMain 保留背景图） */
 .stApp, section.stMain > div, section.stMain > div > div {{
     background: transparent !important;
+}}
+
+/* ===== 卡片弹窗全屏样式 ===== */
+/* 当卡片弹窗激活时，全屏显示 iframe 及其所有容器 */
+.card-modal-overlay .stAppViewContainer,
+.card-modal-overlay .stAppViewContainer > div,
+.card-modal-overlay .stMain,
+.card-modal-overlay .stMainBlockContainer,
+.card-modal-overlay .stVerticalBlock,
+.card-modal-overlay .stElementContainer:last-child {{
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 99999 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    overflow: hidden !important;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}}
+.card-modal-overlay .stElementContainer:last-child iframe {{
+    width: 100vw !important;
+    height: 100vh !important;
+    border: none !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    z-index: 100000 !important;
+}}
+/* 弹窗激活时隐藏侧边栏和其他内容 */
+.card-modal-overlay [data-testid="stSidebar"],
+.card-modal-overlay section[data-testid="stSidebar"],
+.card-modal-overlay aside,
+.card-modal-overlay .stSidebar {{
+    display: none !important;
+}}
+.card-modal-overlay [data-testid="stToolbar"],
+.card-modal-overlay [data-testid="stDecoration"],
+.card-modal-overlay header {{
+    display: none !important;
 }}
 
 /* ===== 古风主题配色 ===== */
@@ -816,6 +862,230 @@ hr::before {{
 }}
 
 {bg_css}
+
+/* ===== 游戏抽卡 · 粒子流光动画 ===== */
+@keyframes card-appear {{
+    0% {{ opacity: 0; transform: scale(0.5) translateY(60px); filter: blur(20px); }}
+    40% {{ opacity: 0.5; transform: scale(0.7) translateY(30px); filter: blur(10px); }}
+    100% {{ opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }}
+}}
+@keyframes glow-pulse {{
+    0% {{ transform: scale(0.3); opacity: 1; }}
+    50% {{ transform: scale(1.6); opacity: 0.3; }}
+    100% {{ transform: scale(2.2); opacity: 0; }}
+}}
+@keyframes light-burst {{
+    0% {{ transform: scale(0); opacity: 1; background: radial-gradient(circle, #fffbe6 0%, #ffd700 40%, #ff8c00 70%, transparent 100%); }}
+    40% {{ transform: scale(1.3); opacity: 0.7; }}
+    100% {{ transform: scale(1.8); opacity: 0; background: radial-gradient(circle, transparent 0%, transparent 100%); }}
+}}
+@keyframes light-burst-2 {{
+    0% {{ transform: scale(0); opacity: 0.9; background: radial-gradient(circle, #fff8dc 0%, #ffec8b 50%, transparent 100%); }}
+    50% {{ transform: scale(1.1); opacity: 0.5; }}
+    100% {{ transform: scale(1.5); opacity: 0; }}
+}}
+@keyframes particle-float {{
+    0% {{ transform: translateY(0) translateX(0) scale(1); opacity: 1; }}
+    50% {{ transform: translateY(-30px) translateX(10px) scale(1.2); opacity: 0.8; }}
+    100% {{ transform: translateY(-60px) translateX(-5px) scale(0.6); opacity: 0; }}
+}}
+@keyframes particle-spiral {{
+    0% {{ transform: rotate(0deg) translateX(0) scale(1); opacity: 0; }}
+    20% {{ opacity: 1; }}
+    100% {{ transform: rotate(360deg) translateX(50px) scale(0.3); opacity: 0; }}
+}}
+@keyframes sparkle {{
+    0%, 100% {{ opacity: 0; transform: scale(0); }}
+    50% {{ opacity: 1; transform: scale(1); }}
+}}
+@keyframes shimmer {{
+    0% {{ background-position: -200% center; }}
+    100% {{ background-position: 200% center; }}
+}}
+@keyframes rotate-rays {{
+    0% {{ transform: translate(-50%, -50%) rotate(0deg); }}
+    100% {{ transform: translate(-50%, -50%) rotate(360deg); }}
+}}
+@keyframes floor-glow {{
+    0%, 100% {{ opacity: 0.5; }}
+    50% {{ opacity: 0.9; }}
+}}
+
+/* 卡片动画容器 */
+.card-reveal-wrapper {{
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 40px 20px;
+    min-height: 600px;
+}}
+.card-reveal-wrapper .card-bg-layer {{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 500px;
+    height: 500px;
+    border-radius: 50%;
+    pointer-events: none;
+}}
+.card-reveal-wrapper .light-burst {{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 300px;
+    height: 300px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fffbe6 0%, #ffd700 40%, #ff8c00 70%, transparent 100%);
+    animation: light-burst 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    filter: blur(25px);
+    pointer-events: none;
+    z-index: 1;
+}}
+.card-reveal-wrapper .light-burst-2 {{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 250px;
+    height: 250px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fff8dc 0%, #ffb347 50%, transparent 100%);
+    animation: light-burst-2 2.5s cubic-bezier(0.3, 0.7, 0.4, 1) 0.2s forwards;
+    filter: blur(20px);
+    pointer-events: none;
+    z-index: 1;
+}}
+.card-reveal-wrapper .glow-ring {{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 320px;
+    height: 440px;
+    border-radius: 20px;
+    background: radial-gradient(ellipse at center, rgba(255, 215, 0, 0.45) 0%, rgba(255, 215, 0, 0.2) 30%, transparent 70%);
+    animation: glow-pulse 2.0s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    filter: blur(12px);
+    pointer-events: none;
+    z-index: 2;
+}}
+.card-reveal-wrapper .rotating-rays {{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 500px;
+    height: 500px;
+    pointer-events: none;
+    z-index: 2;
+    animation: rotate-rays 6s linear 0.5s 3;
+}}
+.card-reveal-wrapper .rotating-rays .ray {{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 2px;
+    height: 250px;
+    background: linear-gradient(to top, transparent 0%, rgba(255, 215, 0, 0.6) 30%, rgba(255, 215, 0, 0.1) 70%, transparent 100%);
+    transform-origin: bottom center;
+    border-radius: 50%;
+}}
+.card-reveal-wrapper .particle {{
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 3;
+}}
+.card-reveal-wrapper .particle-float {{
+    animation: particle-float 2.4s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}}
+.card-reveal-wrapper .particle-spiral {{
+    animation: particle-spiral 2.8s cubic-bezier(0.3, 0.7, 0.4, 1) forwards;
+}}
+.card-reveal-wrapper .sparkle {{
+    position: absolute;
+    color: #ffd700;
+    font-size: 18px;
+    animation: sparkle 2.2s ease-in-out forwards;
+    pointer-events: none;
+    z-index: 4;
+}}
+.card-reveal-wrapper .card-image {{
+    position: relative;
+    z-index: 10;
+    max-width: 500px;
+    border-radius: 8px;
+    box-shadow:
+        0 0 30px rgba(255, 215, 0, 0.5),
+        0 0 60px rgba(255, 140, 0, 0.3),
+        0 12px 40px rgba(0, 0, 0, 0.4);
+    animation: card-appear 2.0s cubic-bezier(0.22, 1, 0.36, 1) 0.3s forwards;
+    opacity: 0;
+}}
+.card-reveal-wrapper .card-shimmer {{
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 500px;
+    height: 700px;
+    pointer-events: none;
+    z-index: 11;
+    opacity: 0;
+    animation: card-appear 2.0s cubic-bezier(0.22, 1, 0.36, 1) 0.3s forwards;
+}}
+.card-reveal-wrapper .card-shimmer::after {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        105deg,
+        transparent 0%,
+        transparent 30%,
+        rgba(255, 255, 255, 0.18) 45%,
+        rgba(255, 255, 255, 0.4) 50%,
+        rgba(255, 255, 255, 0.18) 55%,
+        transparent 70%,
+        transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 3s ease-in-out 1.5s forwards;
+    border-radius: 8px;
+}}
+.card-reveal-wrapper .title-banner {{
+    position: relative;
+    z-index: 12;
+    margin-top: 20px;
+    text-align: center;
+    font-family: 'Ma Shan Zheng', 'KaiTi', serif;
+    font-size: 22px;
+    color: var(--gold);
+    letter-spacing: 4px;
+    opacity: 0;
+    animation: card-appear 1.5s ease-out 1.8s forwards;
+    text-shadow: 0 0 10px rgba(255, 215, 0, 0.6);
+}}
+.card-reveal-wrapper .floor-glow {{
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 400px;
+    height: 80px;
+    background: radial-gradient(ellipse at center, rgba(255, 215, 0, 0.6) 0%, rgba(255, 140, 0, 0.3) 40%, transparent 70%);
+    filter: blur(15px);
+    pointer-events: none;
+    z-index: 1;
+    animation: floor-glow 3s ease-in-out 0.5s forwards;
+    opacity: 0;
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -847,6 +1117,414 @@ if _assets_dir.exists():
 
 if not sprite_found:
     st.info("🧚 小精灵图片未找到")
+
+
+def show_card_with_particle_effect(card_image, title="知识卡片"):
+    """
+    展示游戏抽卡风格的全屏弹窗卡片
+    - 使用 st.markdown 直接渲染，避免 iframe overflow 限制
+    - 卡片图片通过 base64 嵌入到 img 标签中
+    - 关闭按钮使用 Streamlit 原生按钮（CSS 定位到右上角）
+    """
+    # 初始化弹窗状态
+    if "show_modal" not in st.session_state:
+        st.session_state.show_modal = False
+    
+    # 如果弹窗未开启，移除 modal-active 类的效果并返回
+    if not st.session_state.show_modal:
+        st.markdown("""
+        <style>
+        body.modal-active::before { display: none !important; }
+        body.modal-active [data-testid="stSidebar"] { display: block !important; }
+        body.modal-active header { display: flex !important; }
+        </style>
+        """, unsafe_allow_html=True)
+        return
+    
+    # ========== 0. 添加 modal-active 类到 body（用于隐藏侧边栏和 header） ==========
+    # 使用 components.html 因为 st.markdown 会过滤 script 标签
+    components.html("""
+    <!DOCTYPE html>
+    <html>
+    <body>
+    <script>
+    (function() {
+        try {
+            var parentDoc = window.parent.document || window.top.document || document;
+            if (parentDoc && parentDoc.body) {
+                parentDoc.body.classList.add('modal-active');
+            }
+        } catch(e) {
+            document.body.classList.add('modal-active');
+        }
+    })();
+    </script>
+    </body>
+    </html>
+    """, height=1)
+    
+    # ========== 1. 全屏遮罩和关闭按钮样式 ==========
+    st.markdown("""
+    <style>
+    /* 全屏遮罩 */
+    body.modal-active::before {
+        content: '';
+        position: fixed;
+        top: 0; left: 0;
+        width: 100vw; height: 100vh;
+        background: rgba(0, 0, 0, 0.9);
+        z-index: 99998;
+    }
+    body.modal-active [data-testid="stSidebar"] { display: none !important; }
+    body.modal-active header { display: none !important; }
+    body.modal-active [data-testid="stAppViewContainer"] { padding-top: 0 !important; }
+    
+    /* 关闭按钮容器 - 固定在右上角 */
+    .st-key-close_modal_btn {
+        position: fixed !important;
+        top: 20px !important;
+        right: 20px !important;
+        left: auto !important;
+        z-index: 100000 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    
+    /* 关闭按钮样式 */
+    .st-key-close_modal_btn button {
+        width: 56px !important;
+        min-width: 56px !important;
+        height: 56px !important;
+        border-radius: 50% !important;
+        background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%) !important;
+        border: 3px solid rgba(255,215,0,0.9) !important;
+        color: #fff !important;
+        font-size: 24px !important;
+        font-weight: bold !important;
+        box-shadow: 0 4px 20px rgba(255,215,0,0.6), 0 0 30px rgba(255,140,0,0.4) !important;
+        transition: all 0.3s ease !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        animation: closeBtnPulse 2s ease-in-out infinite !important;
+    }
+    .st-key-close_modal_btn button:hover {
+        transform: scale(1.15) !important;
+        box-shadow: 0 6px 35px rgba(255,215,0,0.8), 0 0 45px rgba(255,140,0,0.6) !important;
+    }
+    @keyframes closeBtnPulse {
+        0%, 100% { box-shadow: 0 4px 20px rgba(255,215,0,0.6), 0 0 30px rgba(255,140,0,0.4); }
+        50% { box-shadow: 0 4px 20px rgba(255,215,0,0.9), 0 0 45px rgba(255,140,0,0.6); }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # ========== 2. 关闭按钮 ==========
+    if st.button("✕", key="close_modal_btn", help="点击关闭弹窗", 
+                 type="primary", use_container_width=False):
+        st.session_state.show_modal = False
+        st.rerun()
+    
+    # ========== 3. 卡片弹窗内容（使用 st.markdown 直接渲染，不使用 iframe） ==========
+    
+    import io
+    buf = io.BytesIO()
+    card_image.save(buf, format="PNG")
+    img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    import random
+    random.seed(42)
+
+    # 生成下落粒子
+    falling_particles = ""
+    for i in range(80):
+        x = random.randint(-300, 300)
+        start_y = random.randint(-600, -200)
+        end_y = random.randint(-100, 300)
+        size = random.randint(4, 10)
+        delay = round(random.uniform(0, 4), 2)
+        dur = round(random.uniform(3, 5), 1)
+        drift_x = round(random.uniform(-60, 60), 0)
+        colors = ['#ffd700', '#ffb347', '#fffbe6', '#ff8c00', '#ffe55c', '#fff8dc']
+        color = random.choice(colors)
+        falling_particles += f'<div class="fp" style="--sx:{start_y}px;--ex:{drift_x}px;--ey:{end_y}px;left:calc(50% + {x}px);width:{size}px;height:{size}px;background:{color};box-shadow:0 0 {size*4}px {color};animation-delay:{delay}s;animation-duration:{dur}s"></div>'
+
+    # 生成环绕粒子
+    orbit_particles = ""
+    for i in range(30):
+        angle = (i / 30) * 360
+        radius = random.randint(200, 260)
+        size = random.randint(5, 10)
+        colors = ['#ffd700', '#ffb347', '#fffbe6', '#ffe55c']
+        color = random.choice(colors)
+        orbit_particles += f'<div class="op" style="--angle:{angle}deg;--r:{radius}px;width:{size}px;height:{size}px;background:{color};box-shadow:0 0 {size*3}px {color};"></div>'
+
+    # 闪光星星
+    sparkle_html = ""
+    for s in range(20):
+        x = random.randint(-250, 250)
+        y = random.randint(-300, 300)
+        delay = round(random.uniform(0, 4), 2)
+        size = random.randint(14, 32)
+        sparkle_html += f'<div class="sparkle" style="left:calc(50% + {x}px);top:calc(50% + {y}px);animation-delay:{delay}s;font-size:{size}px">✦</div>'
+
+    # 旋转光线
+    rays_html = ""
+    for r in range(24):
+        rays_html += f'<div class="ray" style="--ray-angle:{r * 15}deg"></div>'
+
+    # 预生成 idle 粒子
+    idle_particles_html = ""
+    for i in range(40):
+        x = round(random.uniform(-250, 250), 0)
+        y = round(random.uniform(-320, 320), 0)
+        dur = round(random.uniform(3, 8), 1)
+        delay = round(random.uniform(0, 6), 1)
+        size = random.randint(4, 8)
+        hue = '#ffd700' if random.random() > 0.3 else '#ffb347'
+        idle_particles_html += f'<div class="ip" style="left:calc(50% + {x}px);top:calc(50% + {y}px);width:{size}px;height:{size}px;background:{hue};box-shadow:0 0 {size*3}px {hue}, 0 0 {size*6}px rgba(255,180,71,0.4);animation-duration:{dur}s;animation-delay:{delay}s"></div>'
+
+    # 完整的卡片弹窗 HTML（使用 st.markdown 直接渲染）
+    modal_html = f"""
+    <style>
+    /* 弹窗容器 - 全屏固定定位 */
+    .card-modal {{
+        position: fixed;
+        top: 0; left: 0;
+        width: 100vw; height: 100vh;
+        background: radial-gradient(ellipse at center, rgba(20,10,5,0.95) 0%, rgba(10,5,2,0.99) 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 99999;
+        overflow: visible;
+    }}
+
+    /* 舞台容器 - 定位卡片和粒子 */
+    .card-stage {{
+        position: relative;
+        width: 600px;
+        height: 800px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }}
+
+    /* 中心光晕爆发 */
+    .burst {{
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%,-50%);
+        width: 360px; height: 360px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #fffbe6 0%, #ffd700 30%, #ff8c00 60%, transparent 100%);
+        filter: blur(35px);
+        z-index: 1;
+        opacity: 0;
+        animation: burstAnim 2.5s cubic-bezier(0.2,0.8,0.2,1) forwards;
+    }}
+    .burst-2 {{
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%,-50%);
+        width: 280px; height: 280px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #fff8dc 0%, #ffb347 50%, transparent 100%);
+        filter: blur(28px);
+        z-index: 1;
+        opacity: 0;
+        animation: burstAnim2 3s cubic-bezier(0.3,0.7,0.4,1) 0.2s forwards;
+    }}
+
+    /* 卡片光晕 */
+    .glow {{
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%,-50%);
+        width: 380px; height: 500px;
+        border-radius: 16px;
+        background: radial-gradient(ellipse at center, rgba(255,215,0,0.5) 0%, rgba(255,215,0,0.25) 30%, transparent 70%);
+        filter: blur(18px);
+        z-index: 2;
+        opacity: 0;
+        animation: glowAnim 2.2s cubic-bezier(0.2,0.8,0.2,1) forwards;
+    }}
+
+    /* 旋转光线 */
+    .rays {{
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%,-50%);
+        width: 600px; height: 600px;
+        pointer-events: none;
+        z-index: 3;
+        opacity: 0;
+        animation: raysFade 0.5s ease forwards, spin 8s linear 0.5s 2;
+    }}
+    .rays .ray {{
+        position: absolute;
+        top: 50%; left: 50%;
+        width: 2px; height: 300px;
+        background: linear-gradient(to top, transparent 0%, rgba(255,215,0,0.7) 20%, rgba(255,215,0,0.15) 60%, transparent 100%);
+        transform-origin: bottom center;
+        transform: translateX(-50%) rotate(var(--ray-angle));
+    }}
+
+    /* 下落粒子 */
+    .fp {{
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 5;
+        opacity: 0;
+        animation: fallingP var(--dur,3s) cubic-bezier(0.3,0.7,0.4,1) forwards;
+    }}
+
+    /* 环绕粒子 */
+    .op {{
+        position: absolute;
+        top: 50%; left: 50%;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 4;
+        opacity: 0;
+        animation: orbitP 4s cubic-bezier(0.3,0.7,0.4,1) forwards;
+    }}
+
+    /* 闪光星星 */
+    .sparkle {{
+        position: absolute;
+        color: #ffd700;
+        pointer-events: none;
+        z-index: 6;
+        opacity: 0;
+        animation: sparkleAnim 2.5s ease-in-out forwards;
+        text-shadow: 0 0 10px #ffd700, 0 0 20px #ffb347;
+    }}
+
+    /* 卡片图片样式 */
+    .card-img {{
+        position: relative;
+        z-index: 10;
+        width: 420px;
+        border-radius: 12px;
+        box-shadow: 0 0 40px rgba(255,215,0,0.6), 0 0 80px rgba(255,140,0,0.4), 0 16px 50px rgba(0,0,0,0.8);
+    }}
+
+    /* 闪光扫过效果 */
+    .shimmer {{
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%,-50%);
+        width: 420px; height: 560px;
+        pointer-events: none;
+        z-index: 11;
+        opacity: 0;
+        border-radius: 12px;
+        overflow: hidden;
+    }}
+    .shimmer::after {{
+        content: '';
+        position: absolute;
+        top: -50%; left: -50%;
+        width: 200%; height: 200%;
+        background: linear-gradient(105deg, transparent 0%, transparent 35%, rgba(255,255,255,0.2) 45%, rgba(255,255,255,0.5) 50%, rgba(255,255,255,0.2) 55%, transparent 65%, transparent 100%);
+        background-size: 200% 100%;
+        animation: shimmerMove 3.5s ease-in-out 2s forwards;
+    }}
+
+    /* 地面光晕 */
+    .floor {{
+        position: absolute;
+        bottom: 20px; left: 50%;
+        transform: translateX(-50%);
+        width: 380px; height: 60px;
+        background: radial-gradient(ellipse at center, rgba(255,215,0,0.6) 0%, rgba(255,215,0,0.2) 40%, transparent 70%);
+        filter: blur(20px);
+        z-index: 9;
+        opacity: 0;
+        animation: floorAnim 3s ease-out 0.8s forwards;
+    }}
+
+    /* 标题 */
+    .card-title {{
+        position: absolute;
+        bottom: -60px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 12;
+        text-align: center;
+        font-family: 'Ma Shan Zheng', 'KaiTi', 'STKaiti', serif;
+        font-size: 28px;
+        color: #ffd700;
+        letter-spacing: 8px;
+        white-space: nowrap;
+        opacity: 0;
+        animation: titleAnim 1.5s ease-out 2s forwards;
+        text-shadow: 0 0 15px rgba(255,215,0,0.8), 0 0 30px rgba(255,140,0,0.5);
+    }}
+
+    /* 持续飘浮粒子 */
+    .idle-particles {{
+        position: absolute;
+        top: 50%; left: 50%;
+        width: 500px; height: 600px;
+        pointer-events: none;
+        z-index: 4;
+        opacity: 0;
+        animation: idleFadeIn 1s ease 4s forwards;
+    }}
+    .idle-particles .ip {{
+        position: absolute;
+        border-radius: 50%;
+        animation: idleFloat var(--dur,4s) ease-in-out infinite var(--delay,0s);
+    }}
+
+    /* 动画关键帧 */
+    @keyframes burstAnim {{ 0%{{transform:translate(-50%,-50%) scale(0.2);opacity:1;}} 60%{{transform:translate(-50%,-50%) scale(1.4);opacity:0.6;}} 100%{{transform:translate(-50%,-50%) scale(2.0);opacity:0;}} }}
+    @keyframes burstAnim2 {{ 0%{{transform:translate(-50%,-50%) scale(0);opacity:0.9;}} 50%{{transform:translate(-50%,-50%) scale(1.2);opacity:0.5;}} 100%{{transform:translate(-50%,-50%) scale(1.8);opacity:0;}} }}
+    @keyframes glowAnim {{ 0%{{transform:translate(-50%,-50%) scale(0.5);opacity:1;}} 50%{{transform:translate(-50%,-50%) scale(1.3);opacity:0.4;}} 100%{{transform:translate(-50%,-50%) scale(1.8);opacity:0;}} }}
+    @keyframes raysFade {{ 0%{{opacity:0;}} 20%{{opacity:1;}} 100%{{opacity:0;}} }}
+    @keyframes spin {{ 0%{{transform:translate(-50%,-50%) rotate(0deg);}} 100%{{transform:translate(-50%,-50%) rotate(360deg);}} }}
+    @keyframes fallingP {{ 0%{{opacity:0;transform:translateY(var(--sx)) scale(0.5);}} 15%{{opacity:1;}} 85%{{opacity:0.8;}} 100%{{opacity:0;transform:translate(var(--ex), var(--ey)) scale(0.3);}} }}
+    @keyframes orbitP {{ 0%{{opacity:0;transform:rotate(var(--angle)) translateX(0) scale(0.3);}} 20%{{opacity:1;}} 80%{{opacity:0.6;}} 100%{{opacity:0;transform:rotate(var(--angle)) translateX(var(--r)) scale(0.5);}} }}
+    @keyframes sparkleAnim {{ 0%,100%{{opacity:0;transform:scale(0);}} 30%{{opacity:1;transform:scale(1.3);}} 50%{{opacity:0.8;transform:scale(1);}} 70%{{opacity:1;transform:scale(1.2);}} }}
+    @keyframes shimmerMove {{ 0%{{background-position:-200% center;}} 100%{{background-position:200% center;}} }}
+    @keyframes floorAnim {{ 0%,100%{{opacity:0;}} 40%{{opacity:0.8;}} 80%{{opacity:0.6;}} }}
+    @keyframes titleAnim {{ 0%{{opacity:0;transform:translateX(-50%) translateY(20px);}} 100%{{opacity:1;transform:translateX(-50%) translateY(0);}} }}
+    @keyframes idleFadeIn {{ 0%{{opacity:0;}} 100%{{opacity:0.7;}} }}
+    @keyframes idleFloat {{ 0%,100%{{transform:translate(0,0);}} 25%{{transform:translate(6px,-10px);}} 50%{{transform:translate(-4px,-18px);}} 75%{{transform:translate(-8px,-6px);}} }}
+    </style>
+
+    <div class="card-modal">
+        <div class="card-stage">
+            <div class="burst"></div>
+            <div class="burst-2"></div>
+            <div class="glow"></div>
+            <div class="rays">
+                {rays_html}
+            </div>
+            {orbit_particles}
+            {falling_particles}
+            {sparkle_html}
+            <img src="data:image/png;base64,{img_b64}" class="card-img" alt="{title}" />
+            <div class="shimmer"></div>
+            <div class="floor"></div>
+            <div class="idle-particles">
+                {idle_particles_html}
+            </div>
+            <div class="card-title">✦ {title} ✦</div>
+        </div>
+    </div>
+    """
+    
+    # 使用 st.markdown 直接渲染卡片弹窗（避免 iframe overflow 限制）
+    st.markdown(modal_html, unsafe_allow_html=True)
+    
+    # 停止页面继续渲染（防止弹窗下面显示主界面内容）
+    st.stop()
 
 
 # ========================== 第五段：左侧边栏（设置面板） ==========================
@@ -942,7 +1620,7 @@ if _feather_b64:
 input_text = st.text_area(
     "文本",
     height=160,
-    placeholder="输入你想生成卡片的文字...",
+    placeholder="输入你喜欢的文字...",
 )
 
 # ---------- 书签装饰（右下角） ----------
@@ -1151,11 +1829,12 @@ if generate_btn:  # 👆 只有当用户点了"生成卡片"按钮时，才执�
             card_id = db.save_card(card_data, str(image_path))
             st.success(f"✅ 卡片已保存到卡片书（ID: {card_id}）")
 
-            # ===== 展示图片 =====
-            st.image(
+            # ===== 展示卡片（带炫酷粒子流光动画） =====
+            # 设置弹窗状态为显示
+            st.session_state.show_modal = True
+            show_card_with_particle_effect(
                 card_image,
-                caption=card_data.get("title", "知识卡片"),
-                width=500,
+                title=card_data.get("title", "知识卡片"),
             )
 
             # ===== 下载按钮 =====
